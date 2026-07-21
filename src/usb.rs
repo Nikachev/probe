@@ -1,0 +1,115 @@
+//! CMSIS-DAP USB device (v1 HID + v2 bulk + WinUSB + CDC serial).
+//!
+//! Ported from the original RP2040 firmware; only the `UsbBus` backend changed
+//! (now the nRF52840 USBD peripheral via `nrf-usbd`).
+
+use crate::UsbBus;
+use dap_rs::usb::{dap_v1::CmsisDapV1, dap_v2::CmsisDapV2, winusb::MicrosoftDescriptors, Request};
+use dap_rs::usb_device::{class_prelude::*, prelude::*};
+use defmt::*;
+use usbd_serial::SerialPort;
+
+/// Implements the CMSIS-DAP descriptors and USB polling.
+pub struct ProbeUsb {
+    device: UsbDevice<'static, UsbBus>,
+    device_state: UsbDeviceState,
+    winusb: MicrosoftDescriptors,
+    dap_v1: CmsisDapV1<'static, UsbBus>,
+    dap_v2: CmsisDapV2<'static, UsbBus>,
+    serial: SerialPort<'static, UsbBus>,
+}
+
+const MANUFACTURER: &str = "Probe-rs development team";
+const PRODUCT: &str = "Rusty Probe (nice!nano) with CMSIS-DAP v1/v2 Support";
+
+impl ProbeUsb {
+    #[inline(always)]
+    pub fn new(usb_bus: &'static UsbBusAllocator<UsbBus>) -> Self {
+        let winusb = MicrosoftDescriptors;
+
+        let dap_v1 = CmsisDapV1::new(64, usb_bus);
+        let dap_v2 = CmsisDapV2::new(64, usb_bus);
+        let serial = SerialPort::new(usb_bus);
+
+        let id = crate::device_signature::device_id_hex();
+        info!("Device ID: {}", id);
+
+        let descriptors_en = StringDescriptors::new(LangID::EN)
+            .manufacturer(MANUFACTURER)
+            .product(PRODUCT)
+            .serial_number(id);
+
+        let descriptors_en_us = StringDescriptors::new(LangID::EN_US)
+            .manufacturer(MANUFACTURER)
+            .product(PRODUCT)
+            .serial_number(id);
+
+        let device = UsbDeviceBuilder::new(usb_bus, UsbVidPid(0x1209, 0x4853))
+            .strings(&[descriptors_en, descriptors_en_us])
+            .unwrap() // unwrap: Error only if >16 languages are supplied.
+            .device_class(0)
+            .max_packet_size_0(64)
+            .unwrap() // unwrap: 64 is a valid packet size
+            .max_power(500)
+            .unwrap() // unwrap: 500 is a valid power value
+            .build();
+
+        let device_state = device.state();
+
+        ProbeUsb {
+            device,
+            device_state,
+            winusb,
+            dap_v1,
+            dap_v2,
+            serial,
+        }
+    }
+
+    /// Poll the USB stack. Returns a pending CMSIS-DAP request, if any.
+    pub fn interrupt(&mut self) -> Option<Request> {
+        if self.device.poll(&mut [
+            &mut self.winusb,
+            &mut self.dap_v1,
+            &mut self.dap_v2,
+            &mut self.serial,
+        ]) {
+            let old_state = self.device_state;
+            let new_state = self.device.state();
+            self.device_state = new_state;
+
+            if (old_state != new_state) && (new_state != UsbDeviceState::Configured) {
+                return Some(Request::Suspend);
+            }
+
+            // Discard data from the serial interface (VCP not implemented yet).
+            let mut buf = [0; 64];
+            let _ = self.serial.read(&mut buf);
+
+            let r = self.dap_v1.process();
+            if r.is_some() {
+                return r;
+            }
+
+            let r = self.dap_v2.process();
+            if r.is_some() {
+                return r;
+            }
+        }
+        None
+    }
+
+    /// Transmit a DAP report back over the DAPv1 HID interface.
+    pub fn dap1_reply(&mut self, data: &[u8]) {
+        self.dap_v1
+            .write_packet(data)
+            .expect("DAPv1 EP write failed");
+    }
+
+    /// Transmit a DAP report back over the DAPv2 bulk interface.
+    pub fn dap2_reply(&mut self, data: &[u8]) {
+        self.dap_v2
+            .write_packet(data)
+            .expect("DAPv2 EP write failed");
+    }
+}

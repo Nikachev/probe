@@ -1,0 +1,66 @@
+[package]
+authors = ["Port to nice!nano v2"]
+edition = "2021"
+name = "rusty-probe-nicenano"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+# Original firmware: probe-rs/rusty-probe-firmware (RP2040)
+# This is a port targeting the nice!nano v2 board (nRF52840).
+
+[dependencies]
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7.3"
+
+# RTIC v2 with Cortex-M4 (basepri) backend
+rtic = { version = "2", features = ["thumbv7-backend"] }
+rtic-monotonics = { version = "2", features = ["nrf52840"] }
+rtic-common = { version = "1" }
+
+# nRF52840 HAL + PAC
+nrf52840-hal = "0.19"
+
+# USB device stack + CMSIS-DAP classes
+dap-rs = { version = "0.2.0", features = ["defmt"] }
+usbd-serial = "0.2"
+static_cell = "2.1"
+
+# Logging / panic handler
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+
+embedded-hal = "1.0.0"
+
+# cargo build/run
+[profile.dev]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = false
+opt-level = 's'
+overflow-checks = true
+
+# cargo build/run --release
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false
+
+[profile.dev.build-override]
+codegen-units = 8
+debug = false
+debug-assertions = false
+opt-level = 0
+overflow-checks = false
+
+[profile.release.build-override]
+codegen-units = 8
+debug = false
+debug-assertions = false
+opt-level = 0
+overflow-checks = false
