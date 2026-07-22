@@ -1,6 +1,6 @@
 # RETRO — Key Implementation Lessons & Discoveries
 
-A concise summary of critical findings and architectural quirks identified during the port of `rusty-probe-firmware` to the **nice!nano v2** (nRF52840).
+A concise summary of critical findings and architectural quirks identified during the port of `rusty-probe-firmware` to the **nice!nano v2** (nRF52840) and HIL hardware testing.
 
 ---
 
@@ -26,3 +26,11 @@ A concise summary of critical findings and architectural quirks identified durin
 
 ### 6. Unique USB Serial
 - Derived from read-only register `FICR.DEVICEID[0..1]`, generating a stable 16-character hex serial number per chip.
+
+---
+
+### 7. HIL Dual-Board Verification & SWD Driver Key Takeaways
+- **CPU Clock Accuracy (`CPU_FREQUENCY = 64_000_000`):** nRF52840 CPU runs at 64 MHz. Setting CPU frequency to 32 MHz doubled the generated `SWDCLK` speed (2 MHz instead of 1 MHz), leading to SWD ACK sampling failures on target boards. Always base bit-bang delays on 64 MHz.
+- **Direct PAC Register IO (`NRF_P0->PIN_CNF` / `NRF_P0->IN`):** Replaced `core::mem::replace` HAL enum swapping with single-cycle direct PAC register accesses to `NRF_P0->PIN_CNF[20]` and `NRF_P0->IN`. This eliminates direction-switching latency during turnaround phases.
+- **SWD Read Phase Synchronization:** Extra `read_bit()` turnaround clocks after the 33-bit data payload in `read_inner` shift SWCLK phases by +1 bit, causing subsequent AP/DP register accesses to fail with ACK Fault. Keep payload clock counts strictly aligned with ARM ADIv5 specification.
+- **Internal Line Pull-Up:** Enforce internal `PullUp` on `SWDIO` during input mode to guarantee stable 3.3V high logic state when the line is floating.

@@ -17,7 +17,7 @@ const NRESET_PIN: u8 = 22;
 
 /// HFXO crystal frequency on nice!nano v2 (32 MHz). The CPU runs from this
 /// directly (no PLL is set up), so SWD bit-bang timing is based on 32 MHz.
-const CPU_FREQUENCY: u32 = 32_000_000;
+const CPU_FREQUENCY: u32 = 64_000_000;
 
 /// Reported as DAP_Info "Firmware Version".
 const VERSION_STRING: &str = "nice!nano v2 CMSIS-DAP 0.1.0";
@@ -110,7 +110,7 @@ mod app {
         // reset, high = float so the target's pull-up releases it).
         // The `SWDIO_PIN`/`SWDCLK_PIN`/`NRESET_PIN` constants above document
         // the chosen wiring and are also used in the log line below.
-        let swdio = port0.p0_20.into_floating_input().degrade();
+        let swdio = port0.p0_20.into_push_pull_output(Level::High).degrade();
         let swclk = port0.p0_17.into_push_pull_output(Level::High).degrade();
         let nreset = port0
             .p0_22

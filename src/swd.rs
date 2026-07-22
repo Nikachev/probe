@@ -17,68 +17,64 @@ use dap_rs::{
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{InputPin, OutputPin, StatefulOutputPin};
 use nrf52840_hal::gpio::{
-    Floating, Input, Level, OpenDrainIO, Output, Pin, PushPull,
+    OpenDrainIO, Output, Pin, PushPull,
 };
 
-/// Default SWD clock: 1 MHz. The host may lower/raise this via DAP_SWJ_Clock.
-const DEFAULT_MAX_FREQUENCY: u32 = 1_000_000;
+/// Default SWD clock: 500 kHz. The host may lower/raise this via DAP_SWJ_Clock.
+const DEFAULT_MAX_FREQUENCY: u32 = 500_000;
 
 /// Dynamic SWDIO pin: input while the target drives, output while we drive.
 ///
 /// `Invalid` is used only as a transient slot during the in-place
 /// `core::mem::replace` that swaps the pin between the two modes (nrf-hal has
-/// no dummy-pin constructor).
-enum SwdioPin {
-    Input(Pin<Input<Floating>>),
-    Output(Pin<Output<PushPull>>),
-    Invalid,
+pub struct SwdioPin {
+    pin: Pin<Output<PushPull>>,
 }
 
 impl SwdioPin {
+    pub fn new(pin: Pin<Output<PushPull>>) -> Self {
+        Self { pin }
+    }
+
+    #[inline(always)]
     fn set_input(&mut self) {
-        if matches!(self, SwdioPin::Input(_)) {
-            return;
-        }
-        let prev = core::mem::replace(self, SwdioPin::Invalid);
-        let next = match prev {
-            SwdioPin::Output(o) => SwdioPin::Input(o.into_floating_input()),
-            SwdioPin::Input(i) => SwdioPin::Input(i),
-            SwdioPin::Invalid => unreachable!(),
-        };
-        *self = next;
+        let pin_num = self.pin.pin();
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        port.pin_cnf[pin_num as usize].write(|w| {
+            w.dir().input()
+             .input().connect()
+             .pull().pullup()
+             .drive().s0s1()
+        });
     }
 
+    #[inline(always)]
     fn set_output(&mut self) {
-        if matches!(self, SwdioPin::Output(_)) {
-            return;
-        }
-        let prev = core::mem::replace(self, SwdioPin::Invalid);
-        let next = match prev {
-            SwdioPin::Input(i) => SwdioPin::Output(i.into_push_pull_output(Level::High)),
-            SwdioPin::Output(o) => SwdioPin::Output(o),
-            SwdioPin::Invalid => unreachable!(),
-        };
-        *self = next;
+        let pin_num = self.pin.pin();
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        port.pin_cnf[pin_num as usize].write(|w| {
+            w.dir().output()
+             .input().connect()
+             .pull().disabled()
+             .drive().s0s1()
+        });
     }
 
+    #[inline(always)]
     fn set_high(&mut self) {
-        if let SwdioPin::Output(o) = self {
-            o.set_high().ok();
-        }
+        self.pin.set_high().ok();
     }
 
+    #[inline(always)]
     fn set_low(&mut self) {
-        if let SwdioPin::Output(o) = self {
-            o.set_low().ok();
-        }
+        self.pin.set_low().ok();
     }
 
-    fn is_high(&mut self) -> bool {
-        match self {
-            SwdioPin::Input(i) => i.is_high().unwrap_or(false),
-            SwdioPin::Output(o) => o.is_set_high().unwrap_or(false),
-            SwdioPin::Invalid => false,
-        }
+    #[inline(always)]
+    fn is_high(&self) -> bool {
+        let pin_num = self.pin.pin();
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        (port.in_.read().bits() & (1 << pin_num)) != 0
     }
 }
 
@@ -293,8 +289,7 @@ impl swd::Swd<Context> for Swd {
         // Read data and parity.
         let (data, parity) = self.read_data();
 
-        // Turnaround + trailing: read one bit, then drive SWDIO low to avoid floating.
-        self.read_bit();
+        // Trailing: drive SWDIO low to avoid floating (first bit serves as turnaround).
         self.tx8(0);
 
         if parity as u8 == (data.count_ones() as u8 & 1) {
@@ -369,6 +364,7 @@ impl Swd {
 
     fn rx4(&mut self) -> u8 {
         self.0.swdio_to_input();
+        asm::delay(self.0.half_period_ticks);
         let mut data = 0;
         for i in 0..4 {
             data |= (self.read_bit() & 1) << i;
@@ -378,6 +374,7 @@ impl Swd {
 
     fn rx5(&mut self) -> u8 {
         self.0.swdio_to_input();
+        asm::delay(self.0.half_period_ticks);
         let mut data = 0;
         for i in 0..5 {
             data |= (self.read_bit() & 1) << i;
@@ -396,6 +393,7 @@ impl Swd {
 
     fn read_data(&mut self) -> (u32, bool) {
         self.0.swdio_to_input();
+        asm::delay(self.0.half_period_ticks);
         let mut data = 0;
         for i in 0..32 {
             data |= (self.read_bit() as u32 & 1) << i;
@@ -423,8 +421,8 @@ impl Swd {
         let hp = self.0.half_period_ticks;
         self.0.swclk.set_low();
         asm::delay(hp);
-        let bit = self.0.swdio.is_high() as u8;
         self.0.swclk.set_high();
+        let bit = self.0.swdio.is_high() as u8;
         asm::delay(hp);
         bit
     }
@@ -518,17 +516,17 @@ pub type DapHandler = Dap<'static, Context, Leds, Wait, Jtag, Swd, Swo>;
 
 /// Build a DAP handler from the SWD pins.
 ///
-/// * `swdio`  - bidirectional data line (start as floating input)
+/// * `swdio`  - bidirectional data line (start as pullup input)
 /// * `swclk`  - clock line (push-pull output)
 /// * `nreset` - target reset line (open-drain output)
 pub fn create_dap(
     version_string: &'static str,
-    swdio: Pin<Input<Floating>>,
+    swdio: Pin<Output<PushPull>>,
     swclk: Pin<Output<PushPull>>,
     nreset: Pin<Output<OpenDrainIO>>,
     cpu_frequency: u32,
 ) -> DapHandler {
-    let swdio = SwdioPin::Input(swdio);
+    let swdio = SwdioPin::new(swdio);
     let context = Context::with_frequency(swdio, swclk, nreset, cpu_frequency, DEFAULT_MAX_FREQUENCY);
     let wait = Wait { cpu_frequency };
     let swo = None;
