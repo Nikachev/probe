@@ -82,9 +82,33 @@ impl ProbeUsb {
                 return Some(Request::Suspend);
             }
 
-            // Discard data from the serial interface (VCP not implemented yet).
-            let mut buf = [0; 64];
-            let _ = self.serial.read(&mut buf);
+            // Check for 1200 baud touch reboot (Adafruit / Nordic DFU trigger standard).
+            if self.serial.line_coding().data_rate() == 1200 {
+                defmt::info!("1200 baud touch detected -> resetting to UF2 bootloader");
+                crate::reset_to_bootloader();
+            }
+
+
+            // Check for explicit text commands ("dfu", "bootloader", "reset", "reboot", "boot")
+            let mut buf = [0u8; 64];
+            if let Ok(count) = self.serial.read(&mut buf) {
+                if count > 0 {
+                    if let Ok(s) = core::str::from_utf8(&buf[..count]) {
+                        let cmd = s.trim();
+                        if cmd.eq_ignore_ascii_case("dfu")
+                            || cmd.eq_ignore_ascii_case("bootloader")
+                            || cmd.eq_ignore_ascii_case("reset")
+                            || cmd.eq_ignore_ascii_case("reboot")
+                            || cmd.eq_ignore_ascii_case("boot")
+                        {
+                            defmt::info!("CDC DFU command received ('{}') -> resetting to UF2 bootloader", cmd);
+                            let _ = self.serial.write(b"Resetting to UF2 bootloader...\r\n");
+                            crate::reset_to_bootloader();
+                        }
+                    }
+                }
+            }
+
 
             let r = self.dap_v1.process();
             if r.is_some() {

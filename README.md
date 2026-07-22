@@ -110,7 +110,9 @@ probe-rs run --chip nRF52840_xxAA --probe 1209:4853 firmware.elf --rtt-scan-memo
 The repository includes a complete automated 29-test HIL suite for verifying CMSIS-DAP probe functionality using a second nice!nano v2 board as target MCU.
 
 - **Build Test Targets:** `./tools/build-test-targets.sh`
-- **Run Automated Test Suite (29/29 PASS):** `./tools/run_hil_tests.py`
+- **Run Full Automated Test Suite (29/29 PASS):** `./tools/run_hil_tests.py`
+- **Run Specific Test Suite or Test:** `./tools/run_hil_tests.py --suite 3` or `./tools/run_hil_tests.py --test TS-301`
+- **Cross-Platform Auto-Flash & Test:** `./tools/auto_flash_and_test.py`
 
 ### Test Performance Metrics:
 - **Flash Download Throughput:** **165.98 KB/s**
@@ -118,6 +120,7 @@ The repository includes a complete automated 29-test HIL suite for verifying CMS
 - **Test Pass Rate:** **29/29 (100% Passed)**
 
 For complete wiring diagrams, pinout instructions, and detailed test suite documentation, see the [HIL Testing Guide](docs/HIL_TESTING.md).
+
 
 ---
 

@@ -88,6 +88,14 @@ pub struct Context {
     half_period_ticks: u32,
 }
 
+/// Calculate half-period cycle delay ticks for SWCLK generation based on CPU and target clock frequencies.
+pub fn calculate_half_period_ticks(cpu_frequency: u32, max_frequency: u32) -> u32 {
+    if max_frequency == 0 {
+        return 1;
+    }
+    (cpu_frequency / max_frequency / 2).max(1)
+}
+
 impl Context {
     fn with_frequency(
         swdio: SwdioPin,
@@ -96,7 +104,7 @@ impl Context {
         cpu_frequency: u32,
         max_frequency: u32,
     ) -> Self {
-        let half_period_ticks = (cpu_frequency / max_frequency / 2).max(1);
+        let half_period_ticks = calculate_half_period_ticks(cpu_frequency, max_frequency);
         Context {
             swdio,
             swclk,
@@ -532,3 +540,5 @@ pub fn create_dap(
     let swo = None;
     Dap::new(context, Leds, wait, swo, version_string)
 }
+
+

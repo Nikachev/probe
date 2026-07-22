@@ -1,63 +1,91 @@
 #!/usr/bin/env python3
 """
-Flashes tmp/app.uf2 to nice!nano board.
-If NICENANO is not mounted, attempts mounting via diskutil or waiting for user double-tap.
+Software DFU trigger & auto-flasher for rusty-probe-nicenano.
+Sends 1200-baud touch or 'dfu' command over CDC serial to reboot into Adafruit UF2 bootloader,
+copies tmp/app.uf2, and executes the HIL test suite.
 """
 
 import os
 import sys
 import time
 import shutil
+import glob
 import subprocess
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 UF2_PATH = os.path.join(PROJECT_ROOT, "tmp", "app.uf2")
 
-def find_nicenano_disk():
-    res = subprocess.run(["diskutil", "list"], capture_output=True, text=True)
-    for line in res.stdout.splitlines():
-        if "NICENANO" in line and "disk" in line:
-            # line example: 0: NICENANO *33.7 MB disk4
-            parts = line.strip().split()
-            for p in parts:
-                if p.startswith("disk"):
-                    return p
+
+def trigger_software_dfu():
+    """Triggers software DFU via 1200 baud touch or 'dfu' command on CDC serial port."""
+    ports = glob.glob("/dev/tty.usbmodem*") + glob.glob("/dev/ttyACM*")
+    for p in ports:
+        try:
+            print(f"Sending 1200-baud DFU reset touch to {p}...")
+            if sys.platform == "darwin":
+                subprocess.run(["stty", "-f", p, "1200"], capture_output=True, timeout=1)
+            else:
+                subprocess.run(["stty", "-F", p, "1200"], capture_output=True, timeout=1)
+        except Exception:
+            pass
+
+
+def find_nicenano_mount():
+    """Finds NICENANO mount point on macOS or Linux."""
+    possible_paths = [
+        "/Volumes/NICENANO",
+    ]
+    possible_paths.extend(glob.glob("/media/*/NICENANO"))
+    possible_paths.extend(glob.glob("/run/media/*/NICENANO"))
+    possible_paths.extend(glob.glob("/mnt/NICENANO"))
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
     return None
 
-def main():
-    print("Checking for NICENANO bootloader drive...")
-    
-    if not os.path.exists("/Volumes/NICENANO"):
-        disk = find_nicenano_disk()
-        if disk:
-            print(f"Found unmounted NICENANO disk {disk}. Mounting...")
-            subprocess.run(["diskutil", "mount", disk])
-            time.sleep(1)
 
-    if not os.path.exists("/Volumes/NICENANO"):
-        print("Please double-tap RESET on Board A (Probe) now.")
-        for _ in range(120):
-            disk = find_nicenano_disk()
-            if disk:
-                subprocess.run(["diskutil", "mount", disk])
-            if os.path.exists("/Volumes/NICENANO"):
+def main():
+    print("==========================================")
+    print(" Automatic DFU Reset & Firmware Flasher")
+    print("==========================================")
+
+    mount_point = find_nicenano_mount()
+
+    if not mount_point:
+        # Trigger software reboot into UF2 bootloader
+        trigger_software_dfu()
+        print("Waiting for NICENANO drive to mount...")
+        for _ in range(10):
+            mount_point = find_nicenano_mount()
+            if mount_point:
+                break
+            time.sleep(0.5)
+
+    if not mount_point:
+        print("Note: If software reset did not trigger, please double-tap RESET on Board A.")
+        for _ in range(60):
+            mount_point = find_nicenano_mount()
+            if mount_point:
                 break
             time.sleep(1)
 
-    if not os.path.exists("/Volumes/NICENANO"):
-        print("❌ Could not find /Volumes/NICENANO. Please double-tap RESET on Board A.")
+    if not mount_point:
+        print("❌ Error: Could not find NICENANO drive.")
         sys.exit(1)
 
-    print("Flashing tmp/app.uf2...")
-    res = subprocess.run(["cp", "-X", UF2_PATH, "/Volumes/NICENANO/"])
-    if res.returncode == 0:
-        print("✅ Flashed successfully! Waiting for re-enumeration...")
+    print(f"✅ Found {mount_point}! Flashing {UF2_PATH}...")
+    try:
+        shutil.copy(UF2_PATH, mount_point)
+        print("✅ Firmware copied successfully! Waiting for probe re-enumeration...")
         time.sleep(3)
-        res_test = subprocess.run([sys.executable, os.path.join(PROJECT_ROOT, "tools", "run_hil_tests.py")])
-        sys.exit(res_test.returncode)
-    else:
-        print("❌ Flash failed.")
+        runner_script = os.path.join(PROJECT_ROOT, "tools", "run_hil_tests.py")
+        res = subprocess.run([sys.executable, runner_script])
+        sys.exit(res.returncode)
+    except Exception as e:
+        print(f"❌ Flashing failed: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
