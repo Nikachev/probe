@@ -9,31 +9,12 @@ import os
 import sys
 import time
 import shutil
-import glob
 import argparse
 import subprocess
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+from common import PROJECT_ROOT, find_nice_nano_dfu_mount
+
 DEFAULT_UF2_PATH = os.path.join(PROJECT_ROOT, "tmp", "app.uf2")
-
-
-def find_nicenano_drive(custom_path=None):
-    """Locates the NICENANO mount point on macOS or Linux."""
-    if custom_path and os.path.exists(custom_path):
-        return custom_path
-
-    possible_paths = [
-        "/Volumes/NICENANO",  # macOS
-    ]
-    # Add Linux user media mount patterns
-    possible_paths.extend(glob.glob("/media/*/NICENANO"))
-    possible_paths.extend(glob.glob("/run/media/*/NICENANO"))
-    possible_paths.extend(glob.glob("/mnt/NICENANO"))
-
-    for p in possible_paths:
-        if os.path.exists(p):
-            return p
-    return None
 
 
 def main():
@@ -50,7 +31,10 @@ def main():
 
     mount_point = None
     for attempt in range(args.timeout):
-        mount_point = find_nicenano_drive(args.mount)
+        if args.mount and os.path.exists(args.mount):
+            mount_point = args.mount
+        else:
+            mount_point = find_nice_nano_dfu_mount()
         if mount_point:
             break
         time.sleep(1)

@@ -13,13 +13,17 @@ import time
 import re
 import argparse
 import subprocess
-import shutil
+import json
 
-PROBE_VID_PID = "1209:4853"
-TARGET_CHIP = "nRF52840_xxAA"
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-TARGETS_DIR = os.path.join(PROJECT_ROOT, "tmp", "test-targets")
+from common import (
+    PROBE_VID_PID,
+    TARGET_CHIP,
+    PROJECT_ROOT,
+    TARGETS_DIR,
+    SCRIPT_DIR,
+    HILConfig,
+    get_probe_rs_cli,
+)
 
 
 class TestResult:
@@ -32,17 +36,37 @@ class TestResult:
         self.throughput_kbps = 0.0
         self.error = None
 
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "description": self.description,
+            "suite": self.suite,
+            "passed": self.passed,
+            "duration": round(self.duration, 4),
+            "throughput_kbps": round(self.throughput_kbps, 2),
+            "error": self.error,
+        }
+
+
+class TestCase:
+    def __init__(self, name, description, suite, func):
+        self.name = name
+        self.description = description
+        self.suite = suite
+        self.func = func
+
 
 class ProbeRsClient:
     """Helper client encapsulating probe-rs CLI execution and default arguments."""
-    def __init__(self, probe_id=PROBE_VID_PID, target_chip=TARGET_CHIP):
-        self.probe_rs_cli = shutil.which("probe-rs")
-        self.probe_id = probe_id
-        self.target_chip = target_chip
+    def __init__(self, config=None):
+        self.config = config or HILConfig()
+        self.probe_rs_cli = get_probe_rs_cli()
 
-    def run_raw(self, args, timeout=30):
+    def run_raw(self, args, timeout=None):
         if not self.probe_rs_cli:
             return -1, "", "probe-rs CLI not found in PATH", 0.0
+        if timeout is None:
+            timeout = self.config.default_timeout
         cmd = [self.probe_rs_cli] + args
         start = time.time()
         try:
@@ -56,32 +80,32 @@ class ProbeRsClient:
         return self.run_raw(["list"])
 
     def info(self, speed=None):
-        cmd = ["info", "--chip", self.target_chip, "--probe", self.probe_id]
+        cmd = ["info", "--chip", self.config.target_chip, "--probe", self.config.probe_id]
         if speed:
             cmd.extend(["--speed", str(speed)])
         return self.run_raw(cmd)
 
     def read(self, width="b32", addr="0x20004000", count=1):
-        return self.run_raw(["read", width, "--chip", self.target_chip, "--probe", self.probe_id, addr, str(count)])
+        return self.run_raw(["read", width, "--chip", self.config.target_chip, "--probe", self.config.probe_id, addr, str(count)])
 
     def write(self, width="b32", addr="0x20004000", values=None):
         if values is None:
             values = []
         if isinstance(values, str):
             values = [values]
-        return self.run_raw(["write", width, "--chip", self.target_chip, "--probe", self.probe_id, addr] + values)
+        return self.run_raw(["write", width, "--chip", self.config.target_chip, "--probe", self.config.probe_id, addr] + values)
 
     def reset(self, connect_under_reset=False):
-        cmd = ["reset", "--chip", self.target_chip, "--probe", self.probe_id]
+        cmd = ["reset", "--chip", self.config.target_chip, "--probe", self.config.probe_id]
         if connect_under_reset:
             cmd.append("--connect-under-reset")
         return self.run_raw(cmd)
 
     def erase(self):
-        return self.run_raw(["erase", "--chip", self.target_chip, "--probe", self.probe_id])
+        return self.run_raw(["erase", "--chip", self.config.target_chip, "--probe", self.config.probe_id])
 
     def download(self, elf_path, verify=False):
-        cmd = ["download", "--chip", self.target_chip, "--probe", self.probe_id]
+        cmd = ["download", "--chip", self.config.target_chip, "--probe", self.config.probe_id]
         if verify:
             cmd.append("--verify")
         cmd.append(elf_path)
@@ -89,9 +113,9 @@ class ProbeRsClient:
 
 
 class HilRunner:
-    def __init__(self, probe_id=PROBE_VID_PID, target_chip=TARGET_CHIP):
-        self.client = ProbeRsClient(probe_id=probe_id, target_chip=target_chip)
-        self.results = []
+    def __init__(self, config=None):
+        self.config = config or HILConfig()
+        self.client = ProbeRsClient(config=self.config)
 
     # --------------------------------------------------------------------------
     # Suite 1: Инициализация, USB Детектирование и DAP Info
@@ -166,8 +190,9 @@ class HilRunner:
 
     def test_ts202_swdio_direction_switch(self):
         res = TestResult("TS-202", "SWDIO Dynamic Direction Switch Verification", suite=2)
-        c1, _, e1, _ = self.client.write("b32", "0x20004000", "0x12345678")
-        c2, out, e2, dur = self.client.read("b32", "0x20004000", 1)
+        addr = self.config.ram_test_addr
+        c1, _, e1, _ = self.client.write("b32", addr, "0x12345678")
+        c2, out, e2, dur = self.client.read("b32", addr, 1)
         res.duration = dur
         if c1 == 0 and c2 == 0 and "12345678" in out.lower():
             res.passed = True
@@ -180,7 +205,7 @@ class HilRunner:
         # Attempt reading invalid unmapped memory address
         bad_code, _, bad_err, _ = self.client.read("b32", "0xFFFFFFFF", 1)
         # Verify valid read succeeds cleanly afterwards
-        good_code, out, err, dur = self.client.read("b32", "0x20004000", 1)
+        good_code, out, err, dur = self.client.read("b32", self.config.ram_test_addr, 1)
         res.duration = dur
         if good_code == 0:
             res.passed = True
@@ -203,7 +228,7 @@ class HilRunner:
     # --------------------------------------------------------------------------
     def test_ts301_ram_read_write(self):
         res = TestResult("TS-301", "Single Word RAM Read/Write (0x20004000)", suite=3)
-        addr = "0x20004000"
+        addr = self.config.ram_test_addr
         val = "0xDEADBEEF"
         w_code, _, w_err, _ = self.client.write("b32", addr, val)
         if w_code != 0:
@@ -220,7 +245,7 @@ class HilRunner:
 
     def test_ts302_subword_access(self):
         res = TestResult("TS-302", "Sub-word & Byte Level RAM Masking", suite=3)
-        addr_base = "0x20004000"
+        addr_base = self.config.ram_test_addr
         w1, _, e1, _ = self.client.write("b8", "0x20004000", "0xA5")
         w2, _, e2, _ = self.client.write("b8", "0x20004001", "0x5A")
         w3, _, e3, _ = self.client.write("b16", "0x20004002", "0x1234")
@@ -332,7 +357,7 @@ class HilRunner:
     def test_ts501_sector_erase(self):
         res = TestResult("TS-501", "Sector Erase & Blank Check (4096-byte Page)", suite=5)
         e_code, _, e_err, _ = self.client.erase()
-        r_code, out, r_err, dur = self.client.read("b32", "0x00026000", 4)
+        r_code, out, r_err, dur = self.client.read("b32", self.config.flash_check_addr, 4)
         res.duration = dur
         if e_code == 0 and r_code == 0:
             res.passed = True
@@ -342,7 +367,7 @@ class HilRunner:
 
     def test_ts502_flash_download(self):
         res = TestResult("TS-502", "Full Binary Flashing (target_blinky.elf)", suite=5)
-        elf_path = os.path.abspath(os.path.join(TARGETS_DIR, "target_blinky.elf"))
+        elf_path = os.path.abspath(os.path.join(self.config.targets_dir, "target_blinky.elf"))
         if not os.path.exists(elf_path):
             subprocess.run([os.path.join(SCRIPT_DIR, "build-test-targets.sh")], check=True)
 
@@ -358,7 +383,7 @@ class HilRunner:
 
     def test_ts503_flash_verification(self):
         res = TestResult("TS-503", "Flash Verification (--verify Byte-for-Byte)", suite=5)
-        elf_path = os.path.abspath(os.path.join(TARGETS_DIR, "target_blinky.elf"))
+        elf_path = os.path.abspath(os.path.join(self.config.targets_dir, "target_blinky.elf"))
         code, out, err, dur = self.client.download(elf_path, verify=True)
         res.duration = dur
         if code == 0:
@@ -369,7 +394,7 @@ class HilRunner:
 
     def test_ts504_mass_erase_recovery(self):
         res = TestResult("TS-504", "Mass Erase Recovery & Bootloader Protection", suite=5)
-        code, out, err, dur = self.client.read("b32", "0x00026000", 1)
+        code, out, err, dur = self.client.read("b32", self.config.flash_check_addr, 1)
         res.duration = dur
         if code == 0:
             res.passed = True
@@ -415,7 +440,7 @@ class HilRunner:
     # --------------------------------------------------------------------------
     def test_ts701_rtt_autodetect(self):
         res = TestResult("TS-701", "RTT Buffer Auto-Detection (_SEGGER_RTT Symbol)", suite=7)
-        rtt_elf = os.path.abspath(os.path.join(TARGETS_DIR, "target_rtt.elf"))
+        rtt_elf = os.path.abspath(os.path.join(self.config.targets_dir, "target_rtt.elf"))
         if not os.path.exists(rtt_elf):
             subprocess.run([os.path.join(SCRIPT_DIR, "build-test-targets.sh")], check=True)
 
@@ -429,30 +454,32 @@ class HilRunner:
 
     def test_ts702_rtt_streaming(self):
         res = TestResult("TS-702", "Up-Buffer High-Speed Streaming (target_rtt.elf)", suite=7)
-        rtt_elf = os.path.abspath(os.path.join(TARGETS_DIR, "target_rtt.elf"))
+        rtt_elf = os.path.abspath(os.path.join(self.config.targets_dir, "target_rtt.elf"))
         if not self.client.probe_rs_cli:
             res.error = "probe-rs CLI not found in PATH"
             return res
         try:
             p = subprocess.Popen(
-                [self.client.probe_rs_cli, "run", "--chip", self.client.target_chip, "--probe", self.client.probe_id, rtt_elf, "--rtt-scan-memory"],
+                [self.client.probe_rs_cli, "run", "--chip", self.client.config.target_chip, "--probe", self.client.config.probe_id, rtt_elf, "--rtt-scan-memory"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
             )
             time.sleep(2)
             p.terminate()
-            p.communicate(timeout=2)
+            stdout, stderr = p.communicate(timeout=2)
             res.duration = 2.0
             res.passed = True
         except Exception as e:
+
             res.duration = 2.0
-            res.passed = True
+            res.passed = False
+            res.error = f"RTT streaming execution failed: {e}"
         return res
 
     def test_ts703_rtt_injection(self):
         res = TestResult("TS-703", "Down-Buffer Command Injection & Echo Channel", suite=7)
-        code, out, err, dur = self.client.read("b32", "0x20004000", 1)
+        code, out, err, dur = self.client.read("b32", self.config.ram_test_addr, 1)
         res.duration = dur
         if code == 0:
             res.passed = True
@@ -460,64 +487,66 @@ class HilRunner:
             res.error = f"RTT channel probe read check failed: {err}"
         return res
 
-    def get_all_tests(self):
+    def get_all_test_cases(self):
         return [
             # Suite 1
-            self.test_ts101_usb_enumeration,
-            self.test_ts102_serial_number,
-            self.test_ts103_capabilities_query,
-            self.test_ts104_target_chip_id,
-            self.test_ts105_coresight_discovery,
+            TestCase("TS-101", "USB Device Enumeration (VID:PID 1209:4853)", 1, self.test_ts101_usb_enumeration),
+            TestCase("TS-102", "Unique Serial Number Verification (FICR DEVICEID)", 1, self.test_ts102_serial_number),
+            TestCase("TS-103", "CMSIS-DAP Capabilities Query (SWD Mode)", 1, self.test_ts103_capabilities_query),
+            TestCase("TS-104", "Target Chip Detection & IDCODE (nRF52840 0x2BA01477)", 1, self.test_ts104_target_chip_id),
+            TestCase("TS-105", "ARM CoreSight Component Discovery (FPB, DWT, ITM)", 1, self.test_ts105_coresight_discovery),
             # Suite 2
-            self.test_ts201_frequency_scaling,
-            self.test_ts202_swdio_direction_switch,
-            self.test_ts203_ack_verification,
-            self.test_ts204_line_reset_sequence,
+            TestCase("TS-201", "SWD Frequency Scaling (100 kHz & 1000 kHz)", 2, self.test_ts201_frequency_scaling),
+            TestCase("TS-202", "SWDIO Dynamic Direction Switch Verification", 2, self.test_ts202_swdio_direction_switch),
+            TestCase("TS-203", "ACK Verification & Negative Error Recovery", 2, self.test_ts203_ack_verification),
+            TestCase("TS-204", "Line Reset & JTAG-to-SWD Sequence (0xE79E)", 2, self.test_ts204_line_reset_sequence),
             # Suite 3
-            self.test_ts301_ram_read_write,
-            self.test_ts302_subword_access,
-            self.test_ts303_bulk_memory_transfer,
-            self.test_ts304_flash_read_boundary,
+            TestCase("TS-301", "Single Word RAM Read/Write (0x20004000)", 3, self.test_ts301_ram_read_write),
+            TestCase("TS-302", "Sub-word & Byte Level RAM Masking", 3, self.test_ts302_subword_access),
+            TestCase("TS-303", "Bulk Memory Transfer & CRC (1024 Bytes)", 3, self.test_ts303_bulk_memory_transfer),
+            TestCase("TS-304", "Flash Read Boundary Test (Vector Table 0x00000000)", 3, self.test_ts304_flash_read_boundary),
             # Suite 4
-            self.test_ts401_cpu_halt,
-            self.test_ts402_register_access,
-            self.test_ts403_single_step,
-            self.test_ts404_hardware_breakpoints,
-            self.test_ts405_watchpoints_dwt,
-            self.test_ts406_cpu_resume,
+            TestCase("TS-401", "CPU Halt & Status Check (DHCSR C_HALT)", 4, self.test_ts401_cpu_halt),
+            TestCase("TS-402", "Register Read/Write & Memory State Control", 4, self.test_ts402_register_access),
+            TestCase("TS-403", "Single Step Execution (C_STEP)", 4, self.test_ts403_single_step),
+            TestCase("TS-404", "Hardware Breakpoints via FPB Component", 4, self.test_ts404_hardware_breakpoints),
+            TestCase("TS-405", "Watchpoints via DWT Component", 4, self.test_ts405_watchpoints_dwt),
+            TestCase("TS-406", "CPU Resume & Running State Transition", 4, self.test_ts406_cpu_resume),
             # Suite 5
-            self.test_ts501_sector_erase,
-            self.test_ts502_flash_download,
-            self.test_ts503_flash_verification,
-            self.test_ts504_mass_erase_recovery,
+            TestCase("TS-501", "Sector Erase & Blank Check (4096-byte Page)", 5, self.test_ts501_sector_erase),
+            TestCase("TS-502", "Full Binary Flashing (target_blinky.elf)", 5, self.test_ts502_flash_download),
+            TestCase("TS-503", "Flash Verification (--verify Byte-for-Byte)", 5, self.test_ts503_flash_verification),
+            TestCase("TS-504", "Mass Erase Recovery & Bootloader Protection", 5, self.test_ts504_mass_erase_recovery),
             # Suite 6
-            self.test_ts601_nreset_pulse,
-            self.test_ts602_sysresetreq,
-            self.test_ts603_vector_catch,
+            TestCase("TS-601", "Hardware nRESET Line Pulse (Open-Drain P0.22)", 6, self.test_ts601_nreset_pulse),
+            TestCase("TS-602", "Software SYSRESETREQ (AIRCR Register)", 6, self.test_ts602_sysresetreq),
+            TestCase("TS-603", "Reset and Halt / Vector Catch (DEMCR VC_CORERESET)", 6, self.test_ts603_vector_catch),
             # Suite 7
-            self.test_ts701_rtt_autodetect,
-            self.test_ts702_rtt_streaming,
-            self.test_ts703_rtt_injection,
+            TestCase("TS-701", "RTT Buffer Auto-Detection (_SEGGER_RTT Symbol)", 7, self.test_ts701_rtt_autodetect),
+            TestCase("TS-702", "Up-Buffer High-Speed Streaming (target_rtt.elf)", 7, self.test_ts702_rtt_streaming),
+            TestCase("TS-703", "Down-Buffer Command Injection & Echo Channel", 7, self.test_ts703_rtt_injection),
         ]
 
-    def run_suite(self, selected_suite=None, selected_test=None):
+    def run_suite(self, selected_suite=None, selected_test=None, json_report_path=None):
         print("==========================================================")
         print(" Running Complete Rigorous HIL Test Suite for rusty-probe")
         print("==========================================================")
 
-        all_test_funcs = self.get_all_tests()
-        tests_to_run = []
+        all_test_cases = self.get_all_test_cases()
+        cases_to_run = []
 
-        for tf in all_test_funcs:
-            sample_res = tf()
-            if selected_test and selected_test.lower() not in sample_res.name.lower():
+        for tc in all_test_cases:
+            if selected_test and selected_test.lower() not in tc.name.lower():
                 continue
-            if selected_suite and sample_res.suite != selected_suite:
+            if selected_suite and tc.suite != selected_suite:
                 continue
-            tests_to_run.append((tf, sample_res))
+            cases_to_run.append(tc)
 
+        executed_results = []
         passed_count = 0
-        for tf, res in tests_to_run:
+        for tc in cases_to_run:
+            res = tc.func()
+            executed_results.append(res)
             status = "✅ PASS" if res.passed else "❌ FAIL"
             tp_info = f" [{res.throughput_kbps:.2f} KB/s]" if res.throughput_kbps > 0 else ""
             print(f"[{status}] {res.name}: {res.description} ({res.duration:.2f}s){tp_info}")
@@ -527,8 +556,24 @@ class HilRunner:
                 passed_count += 1
 
         print("----------------------------------------------------------")
-        print(f"Summary: {passed_count}/{len(tests_to_run)} tests passed.")
-        return 0 if passed_count == len(tests_to_run) else 1
+        print(f"Summary: {passed_count}/{len(cases_to_run)} tests passed.")
+
+        if json_report_path:
+            report_data = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "total": len(cases_to_run),
+                "passed": passed_count,
+                "failed": len(cases_to_run) - passed_count,
+                "results": [r.to_dict() for r in executed_results]
+            }
+            try:
+                with open(json_report_path, "w") as f:
+                    json.dump(report_data, f, indent=2)
+                print(f"JSON test report saved to {json_report_path}")
+            except Exception as e:
+                print(f"Failed to write JSON report to {json_report_path}: {e}")
+
+        return 0 if passed_count == len(cases_to_run) else 1
 
 
 def main():
@@ -537,19 +582,24 @@ def main():
     parser.add_argument("--test", type=str, help="Run specific test by ID or name (e.g. TS-301)")
     parser.add_argument("--probe", type=str, default=PROBE_VID_PID, help=f"Probe VID:PID (default: {PROBE_VID_PID})")
     parser.add_argument("--chip", type=str, default=TARGET_CHIP, help=f"Target chip name (default: {TARGET_CHIP})")
+    parser.add_argument("--json-report", type=str, help="Save test report in JSON format to specified path")
     parser.add_argument("--list", action="store_true", help="List all available test cases")
     args = parser.parse_args()
 
-    runner = HilRunner(probe_id=args.probe, target_chip=args.chip)
+    config = HILConfig(probe_id=args.probe, target_chip=args.chip)
+    runner = HilRunner(config=config)
 
     if args.list:
         print("Available HIL Test Cases:")
-        for tf in runner.get_all_tests():
-            res = tf()
-            print(f"  [Suite {res.suite}] {res.name}: {res.description}")
+        for tc in runner.get_all_test_cases():
+            print(f"  [Suite {tc.suite}] {tc.name}: {tc.description}")
         sys.exit(0)
 
-    sys.exit(runner.run_suite(selected_suite=args.suite, selected_test=args.test))
+    sys.exit(runner.run_suite(
+        selected_suite=args.suite,
+        selected_test=args.test,
+        json_report_path=args.json_report
+    ))
 
 
 if __name__ == "__main__":

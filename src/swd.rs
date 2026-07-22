@@ -541,4 +541,20 @@ pub fn create_dap(
     Dap::new(context, Leds, wait, swo, version_string)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_half_period_ticks() {
+        let cpu_freq = 64_000_000;
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 1_000_000), 32);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 500_000), 64);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 100_000), 320);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 0), 1);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 100_000_000), 1);
+    }
+}
+
+
 

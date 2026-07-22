@@ -40,3 +40,16 @@ pub fn device_id_hex() -> &'static str {
     unsafe { core::str::from_utf8_unchecked(id) }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bytes_to_hex_16() {
+        let input: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
+        let hex = bytes_to_hex_16(&input);
+        assert_eq!(&hex, b"0123456789abcdef");
+    }
+}
+
+

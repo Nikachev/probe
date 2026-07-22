@@ -12,7 +12,8 @@ import shutil
 import glob
 import subprocess
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+from common import PROJECT_ROOT, find_nice_nano_dfu_mount
+
 UF2_PATH = os.path.join(PROJECT_ROOT, "tmp", "app.uf2")
 
 
@@ -30,34 +31,19 @@ def trigger_software_dfu():
             pass
 
 
-def find_nicenano_mount():
-    """Finds NICENANO mount point on macOS or Linux."""
-    possible_paths = [
-        "/Volumes/NICENANO",
-    ]
-    possible_paths.extend(glob.glob("/media/*/NICENANO"))
-    possible_paths.extend(glob.glob("/run/media/*/NICENANO"))
-    possible_paths.extend(glob.glob("/mnt/NICENANO"))
-
-    for path in possible_paths:
-        if os.path.exists(path):
-            return path
-    return None
-
-
 def main():
     print("==========================================")
     print(" Automatic DFU Reset & Firmware Flasher")
     print("==========================================")
 
-    mount_point = find_nicenano_mount()
+    mount_point = find_nice_nano_dfu_mount()
 
     if not mount_point:
         # Trigger software reboot into UF2 bootloader
         trigger_software_dfu()
         print("Waiting for NICENANO drive to mount...")
         for _ in range(10):
-            mount_point = find_nicenano_mount()
+            mount_point = find_nice_nano_dfu_mount()
             if mount_point:
                 break
             time.sleep(0.5)
@@ -65,7 +51,7 @@ def main():
     if not mount_point:
         print("Note: If software reset did not trigger, please double-tap RESET on Board A.")
         for _ in range(60):
-            mount_point = find_nicenano_mount()
+            mount_point = find_nice_nano_dfu_mount()
             if mount_point:
                 break
             time.sleep(1)

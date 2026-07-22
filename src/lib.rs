@@ -1,7 +1,9 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 use defmt_rtt as _;
+#[cfg(not(test))]
 use panic_probe as _;
+
 
 pub mod device_signature;
 pub mod swd;
