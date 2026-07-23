@@ -18,9 +18,9 @@ Turns the board into a high-speed SWD debug probe for flashing, debugging, and R
 - **Single LED Status Indication (P0.15):**
   - **Idle / Disconnected:** Short 100 ms pulse once per second.
   - **Connected:** Solid ON when host debugger attaches.
-  - **Running / Active:** Fast 5 Hz blink during target execution or active SWD transfers.
-- **DFU Reboot:** Software trigger to reboot into Adafruit UF2 DFU Bootloader mode (`GPREGRET = 0x57`).
-- **Direct 3.3 V Logic & Zero-Overhead Bit-Bang:** Direct 1-cycle register PAC SWD bit-bang without external level-translator chips.
+  - **Running / Active:** Fast 5 Hz blink during target execution, active SWD transfers, or CDC serial commands.
+- **DFU & Target Reset Commands:** Software CDC triggers to reboot into UF2 Bootloader (`dfu`/`bootloader`) or pulse target `nRESET` (`reset_target`/`target_reset`).
+- **Direct PAC Register IO & High Drive Signals:** Zero-overhead direct register bit-banging with High Drive (`h0h1`) GPIO output for crisp clock/data edges up to 8 MHz.
 
 ---
 
@@ -29,7 +29,7 @@ Turns the board into a high-speed SWD debug probe for flashing, debugging, and R
 | Document | Description |
 |---|---|
 | 📐 **[Architecture Overview](docs/ARCHITECTURE.md)** | Technical specification of the firmware, RTIC 2 tasks, memory map (`0x26000`), SWD driver (`swd.rs`), PAC register IO, and USB stack design. |
-| 🧪 **[HIL Testing Guide](docs/HIL_TESTING.md)** | Comprehensive guide for automated 29-test hardware test suite using two nice!nano v2 boards. |
+| 🧪 **[HIL Testing Guide](docs/HIL_TESTING.md)** | Comprehensive guide for automated 30-test hardware test suite using two nice!nano v2 boards. |
 | 🛠️ **[Hardware Diagnostics](docs/DIAGNOSTICS.md)** | Standalone bring-up (`diag`) and USB serial echo (`diag_usb`) diagnostic firmware guides. |
 
 ---

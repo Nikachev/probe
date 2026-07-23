@@ -12,36 +12,25 @@ use rusty_probe_nicenano as _; // global logger + panic handler + Mono/UsbBus
 /// SWD host. They are NOT the nice!nano on-board SWD/debug footprint (that one
 /// is for *flashing the nice!nano itself*); these are the pins we drive to talk
 /// to an external target. Change them here to match your wiring.
-/// Default choice (nice!nano v2 adjacent left-header GPIOs):
-/// * SWDCLK -> P0.17 (Header label 017)
-/// * SWDIO  -> P0.20 (Header label 020)
-/// * nRESET -> P0.22 (Header label 022, open-drain)
-const SWDIO_PIN: u8 = 20;
-const SWDCLK_PIN: u8 = 17;
-const NRESET_PIN: u8 = 22;
-
-/// HFXO crystal frequency on nice!nano v2 (32 MHz). The CPU runs from this
-/// directly (no PLL is set up), so SWD bit-bang timing is based on 32 MHz.
-const CPU_FREQUENCY: u32 = 64_000_000;
-
 /// Reported as DAP_Info "Firmware Version".
 const VERSION_STRING: &str = "nice!nano v2 CMSIS-DAP 0.1.0";
 
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [SWI0_EGU0, SWI1_EGU1])]
 mod app {
     use core::mem::MaybeUninit;
+    use core::sync::atomic::Ordering;
     use dap_rs::dap::DapVersion;
     use dap_rs::usb::{Request, DAP2_PACKET_SIZE};
     use dap_rs::usb_device::class_prelude::UsbBusAllocator;
     use embedded_hal::digital::{OutputPin, StatefulOutputPin};
     use nrf52840_hal::clocks::{Clocks, ExternalOscillator, Internal, LfOscStopped};
-    use nrf52840_hal::gpio::{p0, Level, OpenDrainConfig, Output, Pin, PushPull};
+    use nrf52840_hal::gpio::{p0, Level, Output, Pin, PushPull};
     use nrf52840_hal::usbd::UsbPeripheral;
     use rtic_monotonics::nrf::timer::prelude::*;
-    use rusty_probe_nicenano::swd::{create_dap, DapHandler};
+    use rusty_probe_nicenano::swd::{create_dap, DapHandler, SwdPinConfig, PROBE_STATUS};
     use rusty_probe_nicenano::{usb::ProbeUsb, Mono, UsbBus};
 
-    use super::{CPU_FREQUENCY, NRESET_PIN, SWDCLK_PIN, SWDIO_PIN, VERSION_STRING};
+    use super::{VERSION_STRING};
 
     /// HFXO-backed clocks, kept alive for `'static` so the USB peripheral can
     /// borrow them.
@@ -115,18 +104,14 @@ mod app {
         // reset, high = float so the target's pull-up releases it).
         // The `SWDIO_PIN`/`SWDCLK_PIN`/`NRESET_PIN` constants above document
         // the chosen wiring and are also used in the log line below.
-        let swdio = port0.p0_20.into_push_pull_output(Level::High).degrade();
-        let swclk = port0.p0_17.into_push_pull_output(Level::High).degrade();
-        let nreset = port0
-            .p0_22
-            .into_open_drain_input_output(OpenDrainConfig::Standard0Disconnect1, Level::High)
-            .degrade();
-        let dap = create_dap(VERSION_STRING, swdio, swclk, nreset, CPU_FREQUENCY);
+        let pin_cfg = SwdPinConfig::default();
+        let pins = pin_cfg.init_pins(port0.p0_20, port0.p0_17, port0.p0_22);
+        let dap = create_dap(VERSION_STRING, pins.swdio, pins.swclk, pins.nreset, pin_cfg.cpu_frequency);
         defmt::info!(
             "SWD backend initialised (SWDIO=P0.{}, SWDCLK=P0.{}, nRESET=P0.{})",
-            SWDIO_PIN,
-            SWDCLK_PIN,
-            NRESET_PIN
+            pin_cfg.swdio_pin,
+            pin_cfg.swclk_pin,
+            pin_cfg.nreset_pin
         );
 
         // Bring up the USB CMSIS-DAP device.
@@ -179,9 +164,6 @@ mod app {
 
     #[task(local = [led], priority = 1)]
     async fn blink(cx: blink::Context) {
-        use core::sync::atomic::Ordering;
-        use rusty_probe_nicenano::swd::PROBE_STATUS;
-
         let mut step: u32 = 0;
         loop {
             let status = PROBE_STATUS.load(Ordering::Relaxed);
@@ -199,7 +181,7 @@ mod app {
                 1 => {
                     // Connected to host: solid ON
                     cx.local.led.set_high().ok();
-                    Mono::delay(100.millis()).await;
+                    Mono::delay(500.millis()).await;
                 }
                 2 => {
                     // Target running: fast blink (5 Hz)
@@ -218,14 +200,11 @@ mod app {
     /// SWD backend.
     #[task(binds = USBD, priority = 2, shared = [probe_usb], local = [dap, resp_buf: [u8; DAP2_PACKET_SIZE as usize] = [0; DAP2_PACKET_SIZE as usize]])]
     fn on_usb(mut cx: on_usb::Context) {
-        use core::sync::atomic::Ordering;
-        use rusty_probe_nicenano::swd::PROBE_STATUS;
-
         let resp_buf = cx.local.resp_buf;
         let dap = cx.local.dap;
 
         cx.shared.probe_usb.lock(|probe_usb| {
-            if let Some(request) = probe_usb.interrupt() {
+            while let Some(request) = probe_usb.interrupt() {
                 match request {
                     Request::DAP1Command((report, n)) => {
                         let len = dap.process_command(&report[..n], resp_buf, DapVersion::V1);

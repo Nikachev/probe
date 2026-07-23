@@ -70,27 +70,31 @@ The nice!nano v2 comes pre-flashed with the Adafruit UF2 Bootloader and Nordic S
 
 The SWD driver implements high-speed bit-banging over GPIO without external hardware level translators.
 
-### Pin Allocations
-- **`SWDCLK` (`P0.17`):** Push-Pull output.
-- **`SWDIO` (`P0.20`):** Dynamic bidirectional signal (Push-Pull output ⇄ Floating Pull-Up input).
-- **`nRESET` (`P0.22`):** Open-Drain output with internal/external pull-up.
+### Pin Allocations & SwdPinConfig
+- **`SwdPinConfig` Layout:** Encapsulates target pin definitions (`P0.20` SWDIO, `P0.17` SWDCLK, `P0.22` nRESET) and system CPU frequency (`64_000_000` Hz) into a unified single-source-of-truth configuration structure.
+- **Centralized Initialization:** `SwdPinConfig::init_pins(p0_20, p0_17, p0_22)` initializes all probe signals with zero boilerplate.
+- **`SWDCLK` (`P0.17`):** Push-Pull output with **High Drive (`H0H1`)** mode for sharp pulse edges up to 8 MHz.
+- **`SWDIO` (`P0.20`):** Dynamic bidirectional signal (Push-Pull **High Drive (`H0H1`)** output ⇄ Floating Pull-Up input).
+- **`nRESET` (`P0.22`):** Open-Drain output (`Standard0Disconnect1`) with target 3.3V pull-up.
 
-### Direct PAC Register Access
-To achieve maximum throughput and zero HAL overhead during turnaround phases, pin direction and pin read operations bypass high-level HAL abstractions and access `NRF_P0` registers directly:
+### Direct PAC Register Access & Bit-Bang Speed
+To achieve maximum throughput and zero HAL overhead during turnaround phases, pin direction, pin state toggling, and pin reads bypass high-level HAL abstractions and access `NRF_P0` registers directly using pre-computed bitmasks (`swclk_mask` and `mask`):
 ```rust
-// Direct PAC configuration of P0.20 direction (Input with Pull-Up vs Push-Pull Output)
+// Direct PAC register write for SWDCLK high/low transitions:
 let p0 = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+p0.outset.write(|w| unsafe { w.bits(swclk_mask) });
+p0.outclr.write(|w| unsafe { w.bits(swclk_mask) });
 
 // Set SWDIO to Input mode with Pull-up:
 p0.pin_cnf[20].write(|w| {
     w.dir().input()
      .input().connect()
      .pull().pullup()
-     .drive().s0s1()
+     .drive().h0h1()
 });
 
-// Fast read of SWDIO pin state:
-let bit_is_high = (p0.in_.read().bits() & (1 << 20)) != 0;
+// Fast mask read of SWDIO pin state:
+let bit_is_high = (p0.in_.read().bits() & swdio_mask) != 0;
 ```
 
 ### CPU Frequency & Delays
@@ -112,9 +116,13 @@ let deviceid1 = ficr.deviceid[1].read().bits();
 // Hex formatted string: "6a674c50f23e076c"
 ```
 
-### Protocol Endpoints
+### Protocol Endpoints & CDC Commands
 - **CMSIS-DAP v1 (HID):** Uses USB Human Interface Device class endpoints for maximum compatibility across operating systems without requiring custom drivers.
 - **CMSIS-DAP v2 (Vendor Bulk):** Uses high-speed raw Bulk endpoints for fast flash memory programming (achieving up to **165.98 KB/s** download speeds).
+- **CDC Serial Commands:**
+  - `dfu` / `bootloader` / `reboot` / `1200 baud touch`: Software trigger into Adafruit UF2 DFU bootloader mode (`GPREGRET = 0x57`).
+  - `reset_target` / `target_reset` / `target-reset`: Asserts a 10 ms hardware `nRESET` pulse to restart the target MCU.
+  - Visual activity feedback via status LED (`PROBE_STATUS`).
 
 ---
 
@@ -122,6 +130,6 @@ let deviceid1 = ficr.deviceid[1].read().bits();
 
 The firmware uses the **RTIC 2 (Real-Time Interrupt-driven Concurrency)** framework for zero-cost async multitasking:
 
-- **`USBD` Interrupt (Priority 2):** Handles USB bus events and receives CMSIS-DAP packets.
-- **`idle` Task:** Serves background processing and USB polling loops.
-- **`led_task` (Priority 1):** Manages status LED (`P0.15`) state transitions (idle pulse, connected solid ON, active fast blink).
+- **`USBD` Interrupt (Priority 2):** Handles USB bus events and receives CMSIS-DAP packets using a batching `while let` event loop to process all queued requests in a single ISR context.
+- **`idle` Task:** Serves background processing and CPU power-saving (`wfi`).
+- **`blink` Task (Priority 1):** Manages status LED (`P0.15`) state transitions (idle pulse, connected solid ON with 500ms sleep, active fast blink).

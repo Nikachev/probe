@@ -46,12 +46,12 @@ impl ProbeUsb {
 
         let device = UsbDeviceBuilder::new(usb_bus, UsbVidPid(0x1209, 0x4853))
             .strings(&[descriptors_en, descriptors_en_us])
-            .unwrap() // unwrap: Error only if >16 languages are supplied.
+            .expect("Failed to set USB string descriptors")
             .device_class(0)
             .max_packet_size_0(64)
-            .unwrap() // unwrap: 64 is a valid packet size
+            .expect("Failed to set USB max_packet_size_0 to 64")
             .max_power(500)
-            .unwrap() // unwrap: 500 is a valid power value
+            .expect("Failed to set USB max_power to 500 mA")
             .build();
 
         let device_state = device.state();
@@ -88,27 +88,7 @@ impl ProbeUsb {
                 crate::reset_to_bootloader();
             }
 
-
-            // Check for explicit text commands ("dfu", "bootloader", "reset", "reboot", "boot")
-            let mut buf = [0u8; 64];
-            if let Ok(count) = self.serial.read(&mut buf) {
-                if count > 0 {
-                    if let Ok(s) = core::str::from_utf8(&buf[..count]) {
-                        let cmd = s.trim();
-                        if cmd.eq_ignore_ascii_case("dfu")
-                            || cmd.eq_ignore_ascii_case("bootloader")
-                            || cmd.eq_ignore_ascii_case("reset")
-                            || cmd.eq_ignore_ascii_case("reboot")
-                            || cmd.eq_ignore_ascii_case("boot")
-                        {
-                            defmt::info!("CDC DFU command received ('{}') -> resetting to UF2 bootloader", cmd);
-                            let _ = self.serial.write(b"Resetting to UF2 bootloader...\r\n");
-                            crate::reset_to_bootloader();
-                        }
-                    }
-                }
-            }
-
+            self.check_cdc_commands();
 
             let r = self.dap_v1.process();
             if r.is_some() {
@@ -121,6 +101,37 @@ impl ProbeUsb {
             }
         }
         None
+    }
+
+    #[inline(always)]
+    fn check_cdc_commands(&mut self) {
+        let mut buf = [0u8; 64];
+        if let Ok(count) = self.serial.read(&mut buf) {
+            if count >= 3 && count <= 32 {
+                if let Ok(s) = core::str::from_utf8(&buf[..count]) {
+                    let cmd = s.trim();
+                    if cmd.eq_ignore_ascii_case("dfu")
+                        || cmd.eq_ignore_ascii_case("bootloader")
+                        || cmd.eq_ignore_ascii_case("reset")
+                        || cmd.eq_ignore_ascii_case("reboot")
+                        || cmd.eq_ignore_ascii_case("boot")
+                    {
+                        crate::swd::PROBE_STATUS.store(2, core::sync::atomic::Ordering::Relaxed);
+                        defmt::info!("CDC DFU command received ('{}') -> resetting to UF2 bootloader", cmd);
+                        let _ = self.serial.write(b"Resetting to UF2 bootloader...\r\n");
+                        crate::reset_to_bootloader();
+                    } else if cmd.eq_ignore_ascii_case("reset_target")
+                        || cmd.eq_ignore_ascii_case("target_reset")
+                        || cmd.eq_ignore_ascii_case("target-reset")
+                    {
+                        crate::swd::PROBE_STATUS.store(2, core::sync::atomic::Ordering::Relaxed);
+                        defmt::info!("CDC target reset command received ('{}') -> pulsing nRESET", cmd);
+                        let _ = self.serial.write(b"Pulsing nRESET on target MCU...\r\n");
+                        crate::swd::pulse_target_nreset();
+                    }
+                }
+            }
+        }
     }
 
     /// Transmit a DAP report back over the DAPv1 HID interface.

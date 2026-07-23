@@ -37,20 +37,69 @@ pub enum HostStatus {
 const DEFAULT_MAX_FREQUENCY: u32 = 500_000;
 
 
-/// Dynamic SWDIO pin: input while the target drives, output while we drive.
-///
-/// `Invalid` is used only as a transient slot during the in-place
-/// `core::mem::replace` that swaps the pin between the two modes (nrf-hal has
+/// SWD pin configuration layout for nice!nano v2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SwdPinConfig {
+    pub swdio_pin: u8,
+    pub swclk_pin: u8,
+    pub nreset_pin: u8,
+    pub cpu_frequency: u32,
+}
+
+#[cfg(target_arch = "arm")]
+use nrf52840_hal::gpio::{p0, Level, OpenDrainConfig};
+
+#[cfg(target_arch = "arm")]
+pub struct SwdPins {
+    pub swdio: Pin<Output<PushPull>>,
+    pub swclk: Pin<Output<PushPull>>,
+    pub nreset: Pin<Output<OpenDrainIO>>,
+}
+
+impl Default for SwdPinConfig {
+    fn default() -> Self {
+        Self {
+            swdio_pin: 20,
+            swclk_pin: 17,
+            nreset_pin: 22,
+            cpu_frequency: 64_000_000,
+        }
+    }
+}
+
+#[cfg(target_arch = "arm")]
+use nrf52840_hal::gpio::Disconnected;
+
+#[cfg(target_arch = "arm")]
+impl SwdPinConfig {
+    pub fn init_pins(
+        &self,
+        swdio: p0::P0_20<Disconnected>,
+        swclk: p0::P0_17<Disconnected>,
+        nreset: p0::P0_22<Disconnected>,
+    ) -> SwdPins {
+        let swdio = swdio.into_push_pull_output(Level::High).degrade();
+        let swclk = swclk.into_push_pull_output(Level::High).degrade();
+        let nreset = nreset
+            .into_open_drain_input_output(OpenDrainConfig::Standard0Disconnect1, Level::High)
+            .degrade();
+        SwdPins { swdio, swclk, nreset }
+    }
+}
+
 #[cfg(target_arch = "arm")]
 pub struct SwdioPin {
     pin: Pin<Output<PushPull>>,
+    mask: u32,
 }
 
 
 #[cfg(target_arch = "arm")]
 impl SwdioPin {
     pub fn new(pin: Pin<Output<PushPull>>) -> Self {
-        Self { pin }
+        let pin_num = pin.pin();
+        let mask = 1 << pin_num;
+        Self { pin, mask }
     }
 
     #[inline(always)]
@@ -73,34 +122,35 @@ impl SwdioPin {
             w.dir().output()
              .input().connect()
              .pull().disabled()
-             .drive().s0s1()
+             .drive().h0h1()
         });
     }
 
     #[inline(always)]
     fn set_high(&mut self) {
-        self.pin.set_high().ok();
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        port.outset.write(|w| unsafe { w.bits(self.mask) });
     }
 
     #[inline(always)]
     fn set_low(&mut self) {
-        self.pin.set_low().ok();
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        port.outclr.write(|w| unsafe { w.bits(self.mask) });
     }
 
     #[inline(always)]
     fn is_high(&self) -> bool {
-        let pin_num = self.pin.pin();
         let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        (port.in_.read().bits() & (1 << pin_num)) != 0
+        (port.in_.read().bits() & self.mask) != 0
     }
 }
 
 #[cfg(target_arch = "arm")]
 /// Context holding the SWD pins and timing information.
-#[cfg(target_arch = "arm")]
 pub struct Context {
     swdio: SwdioPin,
     swclk: Pin<Output<PushPull>>,
+    swclk_mask: u32,
     nreset: Pin<Output<OpenDrainIO>>,
     cpu_frequency: u32,
     max_frequency: u32,
@@ -125,15 +175,38 @@ impl Context {
         cpu_frequency: u32,
         max_frequency: u32,
     ) -> Self {
+        let pin_num = swclk.pin();
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        port.pin_cnf[pin_num as usize].write(|w| {
+            w.dir().output()
+             .input().connect()
+             .pull().disabled()
+             .drive().h0h1()
+        });
+
+        let swclk_mask = 1 << pin_num;
         let half_period_ticks = calculate_half_period_ticks(cpu_frequency, max_frequency);
         Context {
             swdio,
             swclk,
+            swclk_mask,
             nreset,
             cpu_frequency,
             max_frequency,
             half_period_ticks,
         }
+    }
+
+    #[inline(always)]
+    fn set_swclk_high(&mut self) {
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        port.outset.write(|w| unsafe { w.bits(self.swclk_mask) });
+    }
+
+    #[inline(always)]
+    fn set_swclk_low(&mut self) {
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        port.outclr.write(|w| unsafe { w.bits(self.swclk_mask) });
     }
 
     fn swdio_to_input(&mut self) {
@@ -142,14 +215,6 @@ impl Context {
 
     fn swdio_to_output(&mut self) {
         self.swdio.set_output();
-    }
-
-    fn swclk_to_input(&mut self) {
-        // SWCLK is always an output on nice!nano.
-    }
-
-    fn swclk_to_output(&mut self) {
-        // SWCLK is always an output on nice!nano.
     }
 
     fn nreset_release(&mut self) {
@@ -166,11 +231,10 @@ impl swj::Dependencies<Swd, Jtag> for Context {
 
     fn process_swj_pins(&mut self, output: swj::Pins, mask: swj::Pins, wait_us: u32) -> swj::Pins {
         if mask.contains(swj::Pins::SWCLK) {
-            self.swclk_to_output();
             if output.contains(swj::Pins::SWCLK) {
-                self.swclk.set_high();
+                self.swclk.set_high().ok();
             } else {
-                self.swclk.set_low();
+                self.swclk.set_low().ok();
             }
         }
 
@@ -197,7 +261,6 @@ impl swj::Dependencies<Swd, Jtag> for Context {
         asm::delay(delay_ticks);
 
         let mut ret = swj::Pins::empty();
-        self.swclk_to_input();
         ret.set(swj::Pins::SWCLK, self.swclk.is_set_high().unwrap_or(false));
         self.swdio_to_input();
         ret.set(swj::Pins::SWDIO, self.swdio.is_high());
@@ -207,7 +270,6 @@ impl swj::Dependencies<Swd, Jtag> for Context {
     }
 
     fn process_swj_sequence(&mut self, data: &[u8], mut bits: usize) {
-        self.swclk_to_output();
         self.swdio_to_output();
 
         let hp = self.half_period_ticks;
@@ -220,9 +282,9 @@ impl swj::Dependencies<Swd, Jtag> for Context {
                 } else {
                     self.swdio.set_low();
                 }
-                self.swclk.set_low();
+                self.swclk.set_low().ok();
                 asm::delay(hp);
-                self.swclk.set_high();
+                self.swclk.set_high().ok();
                 asm::delay(hp);
             }
             bits -= frame_bits;
@@ -294,9 +356,8 @@ impl From<Swd> for Context {
 #[cfg(target_arch = "arm")]
 impl From<Context> for Swd {
     fn from(mut value: Context) -> Self {
-        // Put the interface into a known state: SWDIO/SWCLK driven.
+        // Put the interface into a known state: SWDIO driven.
         value.swdio_to_output();
-        value.swclk_to_output();
         Self(value)
     }
 }
@@ -365,8 +426,10 @@ impl swd::Swd<Context> for Swd {
         self.0.swdio_to_output();
         for b in data {
             let bit_count = core::cmp::min(num_bits, 8);
-            for i in 0..bit_count {
-                self.write_bit((b >> i) & 0x1);
+            let mut byte_val = *b;
+            for _ in 0..bit_count {
+                self.write_bit(byte_val & 1);
+                byte_val >>= 1;
             }
             num_bits -= bit_count;
         }
@@ -377,9 +440,11 @@ impl swd::Swd<Context> for Swd {
         self.0.swdio_to_input();
         for b in data.iter_mut() {
             let bit_count = core::cmp::min(num_bits, 8);
+            let mut byte_val = 0u8;
             for i in 0..bit_count {
-                *b |= self.read_bit() << i;
+                byte_val |= self.read_bit() << i;
             }
+            *b = byte_val;
             num_bits -= bit_count;
         }
         Ok(())
@@ -432,9 +497,9 @@ impl Swd {
     fn read_data(&mut self) -> (u32, bool) {
         self.0.swdio_to_input();
         asm::delay(self.0.half_period_ticks);
-        let mut data = 0;
+        let mut data = 0u32;
         for i in 0..32 {
-            data |= (self.read_bit() as u32 & 1) << i;
+            data |= (self.read_bit() as u32) << i;
         }
         let parity = self.read_bit() != 0;
         (data, parity)
@@ -448,18 +513,18 @@ impl Swd {
             self.0.swdio.set_low();
         }
         let hp = self.0.half_period_ticks;
-        self.0.swclk.set_low();
+        self.0.set_swclk_low();
         asm::delay(hp);
-        self.0.swclk.set_high();
+        self.0.set_swclk_high();
         asm::delay(hp);
     }
 
     #[inline(always)]
     fn read_bit(&mut self) -> u8 {
         let hp = self.0.half_period_ticks;
-        self.0.swclk.set_low();
+        self.0.set_swclk_low();
         asm::delay(hp);
-        self.0.swclk.set_high();
+        self.0.set_swclk_high();
         let bit = self.0.swdio.is_high() as u8;
         asm::delay(hp);
         bit
@@ -590,6 +655,17 @@ pub fn create_dap(
 /// Calculate even parity for a 32-bit SWD data payload.
 pub fn swd_parity(data: u32) -> bool {
     data.count_ones() % 2 != 0
+}
+
+/// Assert a 10 ms hardware reset pulse on the target nRESET line (P0.22).
+pub fn pulse_target_nreset() {
+    #[cfg(target_arch = "arm")]
+    {
+        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
+        port.outclr.write(|w| unsafe { w.bits(1 << 22) });
+        cortex_m::asm::delay(640_000);
+        port.outset.write(|w| unsafe { w.bits(1 << 22) });
+    }
 }
 
 #[cfg(test)]
