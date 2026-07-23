@@ -1,13 +1,13 @@
-# rusty-probe-firmware — nice!nano v2 (nRF52840) port
+# rusty-probe-nicenano — CMSIS-DAP Debugger Firmware for nice!nano v2
 
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![Target](https://img.shields.io/badge/Target-nRF52840-blue.svg)](https://www.nordicsemi.com/Products/nRF52840)
 [![Protocol](https://img.shields.io/badge/Protocol-CMSIS--DAP%20v1%2Fv2-green.svg)](https://arm-software.github.io/CMSIS_5/DAP/html/index.html)
-[![HIL Tests](https://img.shields.io/badge/HIL--Tests-29%2F29%20PASS-brightgreen.svg)](docs/HIL_TESTING.md)
+[![HIL Tests](https://img.shields.io/badge/HIL--Tests-30%2F30%20PASS-brightgreen.svg)](docs/HIL_TESTING.md)
 
-Port of the [`probe-rs/rusty-probe-firmware`](https://github.com/probe-rs/rusty-probe-firmware) CMSIS-DAP v1/v2 debugger (originally built for RP2040) to the compact and affordable **nice!nano v2** board (nRF52840, Cortex-M4F).
+High-performance **CMSIS-DAP v1 (HID)** and **v2 (Bulk)** SWD debug probe firmware for the compact and affordable **nice!nano v2** board (nRF52840, Cortex-M4F).
 
-Turns the board into a high-speed SWD debug probe for flashing and debugging ARM Cortex-M microcontrollers using `probe-rs`, OpenOCD, PyOCD, and other toolchains.
+Turns the board into a high-speed SWD debug probe for flashing, debugging, and RTT logging on ARM Cortex-M microcontrollers using `probe-rs`, OpenOCD, PyOCD, Keil MDK, and other toolchains.
 
 ---
 
@@ -21,6 +21,16 @@ Turns the board into a high-speed SWD debug probe for flashing and debugging ARM
   - **Running / Active:** Fast 5 Hz blink during target execution or active SWD transfers.
 - **DFU Reboot:** Software trigger to reboot into Adafruit UF2 DFU Bootloader mode (`GPREGRET = 0x57`).
 - **Direct 3.3 V Logic & Zero-Overhead Bit-Bang:** Direct 1-cycle register PAC SWD bit-bang without external level-translator chips.
+
+---
+
+## 📚 Documentation
+
+| Document | Description |
+|---|---|
+| 📐 **[Architecture Overview](docs/ARCHITECTURE.md)** | Technical specification of the firmware, RTIC 2 tasks, memory map (`0x26000`), SWD driver (`swd.rs`), PAC register IO, and USB stack design. |
+| 🧪 **[HIL Testing Guide](docs/HIL_TESTING.md)** | Comprehensive guide for automated 29-test hardware test suite using two nice!nano v2 boards. |
+| 🛠️ **[Hardware Diagnostics](docs/DIAGNOSTICS.md)** | Standalone bring-up (`diag`) and USB serial echo (`diag_usb`) diagnostic firmware guides. |
 
 ---
 
@@ -57,9 +67,16 @@ Turns the board into a high-speed SWD debug probe for flashing and debugging ARM
 ### Building UF2 Firmware
 
 ```bash
+# Build main CMSIS-DAP probe application (tmp/app.uf2):
 ./tools/make-uf2.sh app
+
+# Build standalone diagnostic binary (tmp/diag.uf2):
+./tools/make-uf2.sh diag
+
+# Build USB CDC serial diagnostic binary (tmp/diag_usb.uf2):
+./tools/make-uf2.sh diag_usb
 ```
-The output binary is saved at `tmp/app.uf2` (base address `0x26000`, family ID `0xADA52840`).
+The main application output binary is saved at `tmp/app.uf2` (base address `0x26000`, family ID `0xADA52840`). For details on diagnostic binaries, see the [Hardware Diagnostics Guide](docs/DIAGNOSTICS.md).
 
 ### Flashing nice!nano v2
 1. Connect nice!nano v2 to USB.
@@ -105,21 +122,26 @@ probe-rs run --chip nRF52840_xxAA --probe 1209:4853 firmware.elf --rtt-scan-memo
 
 ---
 
-## 🧪 Hardware-in-the-Loop (HIL) Testing
+## 🧪 Hardware-in-the-Loop (HIL) & Unit Testing
 
-The repository includes a complete automated 29-test HIL suite for verifying CMSIS-DAP probe functionality using a second nice!nano v2 board as target MCU.
+The repository includes host unit tests for firmware logic and a 30-test Pytest HIL suite for verifying CMSIS-DAP probe functionality using a second nice!nano v2 board as target MCU.
 
+- **Build Firmware:** `./tools/make-uf2.sh app`
+- **Flash Probe Firmware:** `python3 tools/flash.py`
 - **Build Test Targets:** `./tools/build-test-targets.sh`
-- **Run Full Automated Test Suite (29/29 PASS):** `./tools/run_hil_tests.py`
-- **Run Specific Test Suite or Test:** `./tools/run_hil_tests.py --suite 3` or `./tools/run_hil_tests.py --test TS-301`
-- **Cross-Platform Auto-Flash & Test:** `./tools/auto_flash_and_test.py`
+- **Run Full HIL Test Suite:** `pytest tools/test_hil.py`
+- **Run Specific Suite or Test:** `pytest tools/test_hil.py -m suite3` or `pytest tools/test_hil.py -k TS-301`
+- **Run Host Unit Tests (Offline):** `python3 tools/run_unit_tests.py`
 
 ### Test Performance Metrics:
+- **Full HIL Suite Execution Time:** **12.70 s** (30 test cases, optimized performance)
+- **Single Test Isolation:** **0.12 s**
 - **Flash Download Throughput:** **165.98 KB/s**
 - **RAM Transfer Bandwidth:** **10.36 KB/s**
-- **Test Pass Rate:** **29/29 (100% Passed)**
+- **Test Pass Rate:** **30/30 (100% Passed)**
 
 For complete wiring diagrams, pinout instructions, and detailed test suite documentation, see the [HIL Testing Guide](docs/HIL_TESTING.md).
+
 
 
 ---
@@ -131,3 +153,10 @@ Ships with Adafruit UF2 Bootloader and **SoftDevice S140 6.1.1** (`0x1000..0x260
 - `0x01000..0x26000`: SoftDevice S140 6.1.1
 - `0x26000..0xF4000`: CMSIS-DAP Application (`FLASH`, ~824 KB)
 - `0xF4000..0x100000`: Adafruit Bootloader + Settings
+
+---
+
+## ℹ️ Project Origins & Credits
+
+This project was originally created as a port of the [`probe-rs/rusty-probe-firmware`](https://github.com/probe-rs/rusty-probe-firmware) CMSIS-DAP v1/v2 debugger (originally targeting RP2040) to the nRF52840 microcontroller on the nice!nano v2 board.
+

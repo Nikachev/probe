@@ -7,30 +7,47 @@
 //! input while the target drives the line (the target provides the SWDIO
 //! pull-up, as required by the ARM SWD spec).
 
+#[cfg(target_arch = "arm")]
 use cortex_m::asm;
+#[cfg(target_arch = "arm")]
 use dap_rs::{
     dap::{Dap, DapLeds, HostStatus},
     jtag, swd::{self, Ack},
     swj::{self, Dependencies},
     swo,
 };
+#[cfg(target_arch = "arm")]
 use embedded_hal::delay::DelayNs;
+#[cfg(target_arch = "arm")]
 use embedded_hal::digital::{InputPin, OutputPin, StatefulOutputPin};
+#[cfg(target_arch = "arm")]
 use nrf52840_hal::gpio::{
     OpenDrainIO, Output, Pin, PushPull,
 };
 
+#[cfg(not(target_arch = "arm"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostStatus {
+    Connected(bool),
+    Running(bool),
+}
+
+#[cfg(target_arch = "arm")]
 /// Default SWD clock: 500 kHz. The host may lower/raise this via DAP_SWJ_Clock.
 const DEFAULT_MAX_FREQUENCY: u32 = 500_000;
+
 
 /// Dynamic SWDIO pin: input while the target drives, output while we drive.
 ///
 /// `Invalid` is used only as a transient slot during the in-place
 /// `core::mem::replace` that swaps the pin between the two modes (nrf-hal has
+#[cfg(target_arch = "arm")]
 pub struct SwdioPin {
     pin: Pin<Output<PushPull>>,
 }
 
+
+#[cfg(target_arch = "arm")]
 impl SwdioPin {
     pub fn new(pin: Pin<Output<PushPull>>) -> Self {
         Self { pin }
@@ -78,7 +95,9 @@ impl SwdioPin {
     }
 }
 
+#[cfg(target_arch = "arm")]
 /// Context holding the SWD pins and timing information.
+#[cfg(target_arch = "arm")]
 pub struct Context {
     swdio: SwdioPin,
     swclk: Pin<Output<PushPull>>,
@@ -96,7 +115,9 @@ pub fn calculate_half_period_ticks(cpu_frequency: u32, max_frequency: u32) -> u3
     (cpu_frequency / max_frequency / 2).max(1)
 }
 
+#[cfg(target_arch = "arm")]
 impl Context {
+
     fn with_frequency(
         swdio: SwdioPin,
         swclk: Pin<Output<PushPull>>,
@@ -140,7 +161,9 @@ impl Context {
     }
 }
 
+#[cfg(target_arch = "arm")]
 impl swj::Dependencies<Swd, Jtag> for Context {
+
     fn process_swj_pins(&mut self, output: swj::Pins, mask: swj::Pins, wait_us: u32) -> swj::Pins {
         if mask.contains(swj::Pins::SWCLK) {
             self.swclk_to_output();
@@ -178,7 +201,6 @@ impl swj::Dependencies<Swd, Jtag> for Context {
         ret.set(swj::Pins::SWCLK, self.swclk.is_set_high().unwrap_or(false));
         self.swdio_to_input();
         ret.set(swj::Pins::SWDIO, self.swdio.is_high());
-        self.nreset_release();
         ret.set(swj::Pins::NRESET, self.nreset.is_high().unwrap_or(false));
 
         ret
@@ -226,22 +248,26 @@ impl swj::Dependencies<Swd, Jtag> for Context {
     }
 }
 
+#[cfg(target_arch = "arm")]
 /// JTAG backend. We only support SWD, so JTAG is marked unavailable and its
 /// handlers are no-ops.
 pub struct Jtag(Context);
 
+#[cfg(target_arch = "arm")]
 impl From<Jtag> for Context {
     fn from(value: Jtag) -> Self {
         value.0
     }
 }
 
+#[cfg(target_arch = "arm")]
 impl From<Context> for Jtag {
     fn from(value: Context) -> Self {
         Self(value)
     }
 }
 
+#[cfg(target_arch = "arm")]
 impl jtag::Jtag<Context> for Jtag {
     const AVAILABLE: bool = false;
 
@@ -254,25 +280,28 @@ impl jtag::Jtag<Context> for Jtag {
     }
 }
 
+#[cfg(target_arch = "arm")]
 /// SWD backend.
 pub struct Swd(Context);
 
+#[cfg(target_arch = "arm")]
 impl From<Swd> for Context {
     fn from(value: Swd) -> Self {
         value.0
     }
 }
 
+#[cfg(target_arch = "arm")]
 impl From<Context> for Swd {
     fn from(mut value: Context) -> Self {
-        // Put the interface into a known state: SWDIO/SWCLK driven, nRESET released.
+        // Put the interface into a known state: SWDIO/SWCLK driven.
         value.swdio_to_output();
         value.swclk_to_output();
-        value.nreset_release();
         Self(value)
     }
 }
 
+#[cfg(target_arch = "arm")]
 impl swd::Swd<Context> for Swd {
     const AVAILABLE: bool = true;
 
@@ -361,6 +390,7 @@ impl swd::Swd<Context> for Swd {
     }
 }
 
+#[cfg(target_arch = "arm")]
 impl Swd {
     fn tx8(&mut self, mut data: u8) {
         self.0.swdio_to_output();
@@ -437,9 +467,12 @@ impl Swd {
 }
 
 /// Dummy SWO backend (trace not supported on nice!nano v2).
+#[cfg(target_arch = "arm")]
 pub struct Swo {}
 
+#[cfg(target_arch = "arm")]
 impl swo::Swo for Swo {
+
     fn set_transport(&mut self, _transport: swo::SwoTransport) {}
     fn set_mode(&mut self, _mode: swo::SwoMode) {}
     fn set_baudrate(&mut self, _baudrate: u32) -> u32 {
@@ -486,8 +519,8 @@ pub static PROBE_STATUS: AtomicU8 = AtomicU8::new(0);
 /// LED status hook for DAP host-status commands.
 pub struct Leds;
 
-impl DapLeds for Leds {
-    fn react_to_host_status(&mut self, status: HostStatus) {
+impl Leds {
+    pub fn react_to_host_status(&mut self, status: HostStatus) {
         match status {
             HostStatus::Connected(connected) => {
                 if connected {
@@ -507,11 +540,21 @@ impl DapLeds for Leds {
     }
 }
 
+#[cfg(target_arch = "arm")]
+impl DapLeds for Leds {
+    fn react_to_host_status(&mut self, status: HostStatus) {
+        Leds::react_to_host_status(self, status);
+    }
+}
+
+
+#[cfg(target_arch = "arm")]
 /// Delay provider for the DAP processor (used by e.g. DAP_Delay).
 pub struct Wait {
     cpu_frequency: u32,
 }
 
+#[cfg(target_arch = "arm")]
 impl DelayNs for Wait {
     fn delay_ns(&mut self, ns: u32) {
         let us = (ns / 1_000).max(1);
@@ -519,9 +562,11 @@ impl DelayNs for Wait {
     }
 }
 
+#[cfg(target_arch = "arm")]
 /// Concrete DAP handler type for nice!nano v2.
 pub type DapHandler = Dap<'static, Context, Leds, Wait, Jtag, Swd, Swo>;
 
+#[cfg(target_arch = "arm")]
 /// Build a DAP handler from the SWD pins.
 ///
 /// * `swdio`  - bidirectional data line (start as pullup input)
@@ -541,6 +586,12 @@ pub fn create_dap(
     Dap::new(context, Leds, wait, swo, version_string)
 }
 
+
+/// Calculate even parity for a 32-bit SWD data payload.
+pub fn swd_parity(data: u32) -> bool {
+    data.count_ones() % 2 != 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -548,13 +599,46 @@ mod tests {
     #[test]
     fn test_calculate_half_period_ticks() {
         let cpu_freq = 64_000_000;
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 2_000_000), 16);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 1_000_000), 32);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 500_000), 64);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 100_000), 320);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 50_000), 640);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 0), 1);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 100_000_000), 1);
+        // Test edge cases with odd CPU frequencies
+        assert_eq!(calculate_half_period_ticks(16_000_000, 1_000_000), 8);
+    }
+
+    #[test]
+    fn test_swd_parity() {
+        assert_eq!(swd_parity(0x0000_0000), false);
+        assert_eq!(swd_parity(0x0000_0001), true);
+        assert_eq!(swd_parity(0x0000_0003), false);
+        assert_eq!(swd_parity(0x8000_0000), true);
+        assert_eq!(swd_parity(0xFFFF_FFFF), false);
+        assert_eq!(swd_parity(0xDEAD_BEEF), (0xDEAD_BEEFu32.count_ones() % 2 != 0));
+        assert_eq!(swd_parity(0x5555_5555), false); // 16 set bits -> even -> false
+        assert_eq!(swd_parity(0x5555_5557), true);  // 17 set bits -> odd -> true
+    }
+
+    #[test]
+    fn test_leds_host_status_transitions() {
+        let mut leds = Leds;
+        leds.react_to_host_status(HostStatus::Connected(true));
+        assert_eq!(PROBE_STATUS.load(Ordering::Relaxed), 1);
+
+        leds.react_to_host_status(HostStatus::Running(true));
+        assert_eq!(PROBE_STATUS.load(Ordering::Relaxed), 2);
+
+        leds.react_to_host_status(HostStatus::Running(false));
+        assert_eq!(PROBE_STATUS.load(Ordering::Relaxed), 1);
+
+        leds.react_to_host_status(HostStatus::Connected(false));
+        assert_eq!(PROBE_STATUS.load(Ordering::Relaxed), 0);
     }
 }
+
 
 
 

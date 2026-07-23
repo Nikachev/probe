@@ -5,8 +5,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTDIR="$ROOT_DIR/tmp/test-targets"
+TARGET="thumbv7em-none-eabihf"
 FAMILY="0xADA52840"      # nRF52840 UF2 family id
-BASE="0x26000"          # application start (after MBR + S140 SoftDevice)
+BASE="0x26000"          # application start (after MBR + SoftDevice)
 
 mkdir -p "$OUTDIR"
 
@@ -16,18 +17,17 @@ echo "=========================================="
 echo " Building HIL Test Target Binaries"
 echo "=========================================="
 
+echo ">> Batch compiling release target binaries..."
+cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml" \
+    --bin target_blinky --bin target_rtt --bin target_fault
+
 for BIN in "${TARGETS[@]}"; do
-    echo ">> Building $BIN (release)..."
-    cargo build --release --bin "$BIN"
+    echo ">> Extracting raw binary & generating UF2 for $BIN..."
+    cargo objcopy --release --manifest-path "$ROOT_DIR/Cargo.toml" --bin "$BIN" -- -O binary "$OUTDIR/$BIN.bin"
+    python3 "$SCRIPT_DIR/uf2conv.py" "$OUTDIR/$BIN.bin" -c -b "$BASE" -f "$FAMILY" -o "$OUTDIR/$BIN.uf2"
 
     echo ">> Copying ELF for $BIN..."
-    cp "$ROOT_DIR/target/thumbv7em-none-eabihf/release/$BIN" "$OUTDIR/$BIN.elf"
-
-    echo ">> Extracting raw binary for $BIN..."
-    cargo objcopy --release --bin "$BIN" -- -O binary "$OUTDIR/$BIN.bin"
-
-    echo ">> Converting $BIN to UF2..."
-    python3 "$SCRIPT_DIR/uf2conv.py" "$OUTDIR/$BIN.bin" -c -b "$BASE" -f "$FAMILY" -o "$OUTDIR/$BIN.uf2"
+    cp "$ROOT_DIR/target/$TARGET/release/$BIN" "$OUTDIR/$BIN.elf"
 
     echo ">> Done: $OUTDIR/$BIN.elf, $OUTDIR/$BIN.bin, $OUTDIR/$BIN.uf2"
     echo "------------------------------------------"

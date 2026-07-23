@@ -1,17 +1,26 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(target_arch = "arm", no_std)]
+#![cfg_attr(target_arch = "arm", no_main)]
 
-//! Target RTT Logging & Echo Firmware for HIL testing.
-//!
-//! Features:
-//! - High-rate RTT log emission via defmt.
-//! - RTT control block symbol `_SEGGER_RTT` exposed for host probing.
-//! - Verification of fast log streaming over CMSIS-DAP SWD.
+// Target RTT Logging & Echo Firmware for HIL testing.
+//
+// Features:
+// - High-rate RTT log emission via defmt.
+// - RTT control block symbol `_SEGGER_RTT` exposed for host probing.
+// - Verification of fast log streaming over CMSIS-DAP SWD.
+
+#[cfg(not(target_arch = "arm"))]
+fn main() {}
+
 
 use cortex_m_rt::entry;
 use defmt_rtt as _;
 use nrf52840_hal as hal;
 use panic_probe as _;
+
+#[cfg(target_arch = "arm")]
+#[link_section = ".boot_vectors"]
+#[no_mangle]
+pub static BOOT_VECTORS: [u32; 2] = [0x2004_0000, 0x0002_6005];
 
 #[no_mangle]
 pub static mut RTT_PACKET_COUNT: u32 = 0;
@@ -29,7 +38,7 @@ fn main() -> ! {
         cp.SCB.vtor.write(0x0002_6000);
     }
 
-    let _dp = hal::pac::Peripherals::take().unwrap();
+    let _dp = unsafe { hal::pac::Peripherals::steal() };
 
     let mut count: u32 = 0;
     loop {

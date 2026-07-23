@@ -3,11 +3,14 @@
 //!
 //! Replaces the RP2040 QSPI-flash UID reading from the original firmware.
 
+#[cfg(target_arch = "arm")]
 use nrf52840_hal::pac;
+#[cfg(target_arch = "arm")]
 use static_cell::StaticCell;
 
 // 8 bytes of DEVICEID -> 16 hex characters.
 const DEVICE_ID_LEN: usize = 16;
+#[cfg(target_arch = "arm")]
 static DEVICE_ID_STR: StaticCell<[u8; DEVICE_ID_LEN]> = StaticCell::new();
 
 /// Convert 8 raw device ID bytes to a 16-byte ASCII hex array.
@@ -24,21 +27,29 @@ pub fn bytes_to_hex_16(bytes: &[u8; 8]) -> [u8; DEVICE_ID_LEN] {
 /// Returns a stable, unique hex string identifying this chip, suitable for use
 /// as a USB serial number. The value is derived from `FICR.DEVICEID[0..2]`.
 pub fn device_id_hex() -> &'static str {
-    // SAFETY: FICR is a read-only peripheral; reading is always sound.
-    let ficr = unsafe { &*pac::FICR::ptr() };
-    let id0 = ficr.deviceid[0].read().bits();
-    let id1 = ficr.deviceid[1].read().bits();
+    #[cfg(target_arch = "arm")]
+    {
+        // SAFETY: FICR is a read-only peripheral; reading is always sound.
+        let ficr = unsafe { &*pac::FICR::ptr() };
+        let id0 = ficr.deviceid[0].read().bits();
+        let id1 = ficr.deviceid[1].read().bits();
 
-    let mut bytes = [0u8; 8];
-    bytes[0..4].copy_from_slice(&id0.to_be_bytes());
-    bytes[4..8].copy_from_slice(&id1.to_be_bytes());
+        let mut bytes = [0u8; 8];
+        bytes[0..4].copy_from_slice(&id0.to_be_bytes());
+        bytes[4..8].copy_from_slice(&id1.to_be_bytes());
 
-    let out = bytes_to_hex_16(&bytes);
+        let out = bytes_to_hex_16(&bytes);
 
-    let id = DEVICE_ID_STR.init(out);
-    // SAFETY: `out` only contains ASCII hex digits.
-    unsafe { core::str::from_utf8_unchecked(id) }
+        let id = DEVICE_ID_STR.init(out);
+        // SAFETY: `out` only contains ASCII hex digits.
+        unsafe { core::str::from_utf8_unchecked(id) }
+    }
+    #[cfg(not(target_arch = "arm"))]
+    {
+        "0123456789abcdef"
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -50,6 +61,26 @@ mod tests {
         let hex = bytes_to_hex_16(&input);
         assert_eq!(&hex, b"0123456789abcdef");
     }
+
+    #[test]
+    fn test_bytes_to_hex_16_edge_cases() {
+        let zeros = [0u8; 8];
+        assert_eq!(&bytes_to_hex_16(&zeros), b"0000000000000000");
+
+        let ones = [0xffu8; 8];
+        assert_eq!(&bytes_to_hex_16(&ones), b"ffffffffffffffff");
+
+        let mixed = [0x0f, 0xf0, 0x5a, 0xa5, 0x12, 0x34, 0x78, 0x90];
+        assert_eq!(&bytes_to_hex_16(&mixed), b"0ff05aa512347890");
+    }
+
+    #[test]
+    fn test_device_id_hex_host() {
+        let id = device_id_hex();
+        assert_eq!(id.len(), 16);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }
+
 
 

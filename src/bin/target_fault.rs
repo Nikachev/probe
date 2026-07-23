@@ -1,17 +1,26 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(target_arch = "arm", no_std)]
+#![cfg_attr(target_arch = "arm", no_main)]
 
-//! Target Fault Generator Firmware for HIL testing.
-//!
-//! Features:
-//! - Allows triggering HardFaults, Breakpoints, or infinite loops on demand.
-//! - Host test runner can write to `FAULT_TRIGGER_MODE` in SRAM via SWD to trigger faults.
-//! - Verifies debugger ability to halt target, inspect CPU registers, and handle exceptions.
+// Target Fault Generator Firmware for HIL testing.
+//
+// Features:
+// - Allows triggering HardFaults, Breakpoints, or infinite loops on demand.
+// - Host test runner can write to `FAULT_TRIGGER_MODE` in SRAM via SWD to trigger faults.
+// - Verifies debugger ability to halt target, inspect CPU registers, and handle exceptions.
+
+#[cfg(not(target_arch = "arm"))]
+fn main() {}
+
 
 use cortex_m_rt::entry;
 use defmt_rtt as _;
 use nrf52840_hal as hal;
 use panic_probe as _;
+
+#[cfg(target_arch = "arm")]
+#[link_section = ".boot_vectors"]
+#[no_mangle]
+pub static BOOT_VECTORS: [u32; 2] = [0x2004_0000, 0x0002_6005];
 
 #[no_mangle]
 pub static mut FAULT_TRIGGER_MODE: u32 = 0; // 0 = Normal loop, 1 = BKPT, 2 = Invalid Address Read, 3 = Division by zero

@@ -1,5 +1,9 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(target_arch = "arm", no_std)]
+#![cfg_attr(target_arch = "arm", no_main)]
+
+#[cfg(not(target_arch = "arm"))]
+fn main() {}
+
 
 // Standalone diagnostic (no RTIC, no USB). Uses the onboard LED (P0.15) to
 // report how far bring-up gets, to locate where app.rs hangs.

@@ -1,19 +1,28 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(target_arch = "arm", no_std)]
+#![cfg_attr(target_arch = "arm", no_main)]
 
-//! Target Blinky Firmware for HIL testing.
-//!
-//! Features:
-//! - VTOR relocation to 0x26000 (nice!nano SoftDevice offset).
-//! - Well-known static symbols in SRAM for read/write verification.
-//! - LED blinking on P0.15 for visual indication of target execution.
-//! - Counter variable in SRAM incremented each loop.
+// Target Blinky Firmware for HIL testing.
+//
+// Features:
+// - VTOR relocation to 0x26000 (nice!nano SoftDevice offset).
+// - Well-known static symbols in SRAM for read/write verification.
+// - LED blinking on P0.15 for visual indication of target execution.
+// - Counter variable in SRAM incremented each loop.
+
+#[cfg(not(target_arch = "arm"))]
+fn main() {}
+
 
 use cortex_m_rt::entry;
 use defmt_rtt as _;
 use embedded_hal::digital::OutputPin;
 use nrf52840_hal as hal;
 use panic_probe as _;
+
+#[cfg(target_arch = "arm")]
+#[link_section = ".boot_vectors"]
+#[no_mangle]
+pub static BOOT_VECTORS: [u32; 2] = [0x2004_0000, 0x0002_6005];
 
 #[no_mangle]
 pub static mut SRAM_MAGIC_1: u32 = 0xDEADBEEF;

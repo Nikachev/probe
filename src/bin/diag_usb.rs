@@ -1,5 +1,9 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(target_arch = "arm", no_std)]
+#![cfg_attr(target_arch = "arm", no_main)]
+
+#[cfg(not(target_arch = "arm"))]
+fn main() {}
+
 
 use core::mem::MaybeUninit;
 use nrf52840_hal::clocks::{Clocks, ExternalOscillator, Internal, LfOscStopped};

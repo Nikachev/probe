@@ -15,6 +15,15 @@
  */
 MEMORY
 {
-  FLASH : ORIGIN = 0x00026000, LENGTH = 0xCE000  /* 0xF4000 - 0x26000 = 824 KB */
-  RAM   : ORIGIN = 0x20000000, LENGTH = 256K
+  BOOT_VECTORS : ORIGIN = 0x00000000, LENGTH = 0x100
+  FLASH        : ORIGIN = 0x00026000, LENGTH = 0xCE000  /* 0xF4000 - 0x26000 = 824 KB */
+  RAM          : ORIGIN = 0x20000000, LENGTH = 256K
+}
+
+SECTIONS
+{
+  .boot_vectors :
+  {
+    KEEP(*(.boot_vectors));
+  } > BOOT_VECTORS
 }

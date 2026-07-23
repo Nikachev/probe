@@ -1,7 +1,12 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(target_arch = "arm", no_std)]
+#![cfg_attr(target_arch = "arm", no_main)]
 
+#[cfg(not(target_arch = "arm"))]
+fn main() {}
+
+#[cfg(target_arch = "arm")]
 use rusty_probe_nicenano as _; // global logger + panic handler + Mono/UsbBus
+
 
 /// SWD transport pins. These are dedicated GPIOs re-purposed as the CMSIS-DAP
 /// SWD host. They are NOT the nice!nano on-board SWD/debug footprint (that one

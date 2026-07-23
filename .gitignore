@@ -2,3 +2,7 @@
 /tmp
 *.bin
 *.uf2
+__pycache__/
+*.pyc
+.pytest_cache/
+
