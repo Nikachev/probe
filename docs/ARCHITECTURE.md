@@ -52,7 +52,7 @@ The firmware binary is compiled with maximum optimization under `[profile.releas
 
 All hardware pins, system clock frequencies, magic reset values, and USB descriptors are consolidated in `src/config.rs`:
 - **Hardware Pins:** `DEFAULT_SWDIO_PIN` (20), `DEFAULT_SWCLK_PIN` (17), `DEFAULT_NRESET_PIN` (22)
-- **Frequencies:** `DEFAULT_CPU_FREQUENCY` (64 MHz), `DEFAULT_MAX_SWD_FREQUENCY` (500 kHz)
+- **Frequencies:** `DEFAULT_CPU_FREQUENCY` (64 MHz), `DEFAULT_MAX_SWD_FREQUENCY` (5 MHz)
 - **Reset Magic Values:** `GPREGRET_BOOTLOADER_CHECK` (`0xAB`), `DFU_MAGIC_UF2_RESET` (`0x57`), `APP_VTOR_OFFSET` (`0x0002_6000`)
 - **USB Constants:** `USB_VID` (`0x1209`), `USB_PID` (`0x4853`), `USB_MANUFACTURER`, `USB_PRODUCT`
 
@@ -96,11 +96,11 @@ pub fn swd_parity(data: u32) -> bool {
 }
 ```
 
-### Direct PAC Register Access via `p0()` Helper
-To achieve maximum throughput during bit-banging, register access uses a zero-cost inline helper `p0()`:
+### Direct PAC Register Access via `p0_reg()` Helper
+To achieve maximum throughput during bit-banging, register access uses a zero-cost inline helper `p0_reg()`:
 ```rust
 #[inline(always)]
-fn p0() -> &'static nrf52840_hal::pac::p0::RegisterBlock {
+fn p0_reg() -> &'static nrf52840_hal::pac::p0::RegisterBlock {
     unsafe { &*nrf52840_hal::pac::P0::ptr() }
 }
 ```

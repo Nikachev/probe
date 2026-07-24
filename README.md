@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![Target](https://img.shields.io/badge/Target-nRF52840-blue.svg)](https://www.nordicsemi.com/Products/nRF52840)
 [![Protocol](https://img.shields.io/badge/Protocol-CMSIS--DAP%20v1%2Fv2-green.svg)](https://arm-software.github.io/CMSIS_5/DAP/html/index.html)
-[![HIL Tests](https://img.shields.io/badge/HIL--Tests-30%2F30%20PASS-brightgreen.svg)](docs/HIL_TESTING.md)
+[![HIL Tests](https://img.shields.io/badge/HIL--Tests-43%2F43%20PASS-brightgreen.svg)](docs/HIL_TESTING.md)
 
 High-performance **CMSIS-DAP v1 (HID)** and **v2 (Bulk)** SWD debug probe firmware for the compact and affordable **nice!nano v2** board (nRF52840, Cortex-M4F).
 
@@ -29,7 +29,7 @@ Turns the board into a high-speed SWD debug probe for flashing, debugging, and R
 | Document | Description |
 |---|---|
 | 📐 **[Architecture Overview](docs/ARCHITECTURE.md)** | Technical specification of the firmware, RTIC 2 tasks, memory map (`0x26000`), SWD driver (`swd.rs`), PAC register IO, and USB stack design. |
-| 🧪 **[HIL Testing Guide](docs/HIL_TESTING.md)** | Comprehensive guide for automated 30-test hardware test suite using two nice!nano v2 boards. |
+| 🧪 **[HIL Testing Guide](docs/HIL_TESTING.md)** | Comprehensive guide for automated 43-test hardware test suite using two nice!nano v2 boards. |
 | 🛠️ **[Hardware Diagnostics](docs/DIAGNOSTICS.md)** | Standalone bring-up (`diag`) and USB serial echo (`diag_usb`) diagnostic firmware guides. |
 
 ---
@@ -124,7 +124,7 @@ probe-rs run --chip nRF52840_xxAA --probe 1209:4853 firmware.elf --rtt-scan-memo
 
 ## 🧪 Hardware-in-the-Loop (HIL) & Unit Testing
 
-The repository includes host unit tests for firmware logic and a 30-test Pytest HIL suite for verifying CMSIS-DAP probe functionality using a second nice!nano v2 board as target MCU.
+The repository includes host unit tests for firmware logic and a 43-test Pytest HIL suite for verifying CMSIS-DAP probe functionality using a second nice!nano v2 board as target MCU.
 
 - **Build Firmware:** `./tools/make-uf2.sh app`
 - **Flash Probe Firmware:** `python3 tools/flash.py`
@@ -134,11 +134,11 @@ The repository includes host unit tests for firmware logic and a 30-test Pytest 
 - **Run Host Unit Tests (Offline):** `python3 tools/run_unit_tests.py`
 
 ### Test Performance Metrics:
-- **Full HIL Suite Execution Time:** **12.70 s** (30 test cases, optimized performance)
+- **Full HIL Suite Execution Time:** **15.05 s** (43 test cases, optimized performance)
 - **Single Test Isolation:** **0.12 s**
 - **Flash Download Throughput:** **165.98 KB/s**
 - **RAM Transfer Bandwidth:** **10.36 KB/s**
-- **Test Pass Rate:** **30/30 (100% Passed)**
+- **Test Pass Rate:** **43/43 (100% Passed)**
 
 For complete wiring diagrams, pinout instructions, and detailed test suite documentation, see the [HIL Testing Guide](docs/HIL_TESTING.md).
 

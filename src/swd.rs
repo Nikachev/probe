@@ -634,8 +634,11 @@ pub struct Wait {
 #[cfg(target_arch = "arm")]
 impl DelayNs for Wait {
     fn delay_ns(&mut self, ns: u32) {
-        let us = (ns / 1_000).max(1);
-        asm::delay(us * (self.cpu_frequency / 1_000_000));
+        if ns == 0 {
+            return;
+        }
+        let cycles = (ns as u64 * self.cpu_frequency as u64 / 1_000_000_000) as u32;
+        asm::delay((cycles / 3).max(1));
     }
 }
 
@@ -676,7 +679,7 @@ pub fn pulse_target_nreset() {
     {
         let pin_mask = 1 << SwdPinConfig::default().nreset_pin;
         p0_reg().outclr.write(|w| unsafe { w.bits(pin_mask) });
-        cortex_m::asm::delay(640_000);
+        cortex_m::asm::delay(crate::config::NRESET_PULSE_TICKS / 3);
         p0_reg().outset.write(|w| unsafe { w.bits(pin_mask) });
     }
 }

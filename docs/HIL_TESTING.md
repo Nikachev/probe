@@ -43,7 +43,7 @@ The script compiles the following binaries into `tmp/test-targets/`:
 
 ---
 
-## 3. Running Automated HIL Test Suite (30 Test Cases)
+## 3. Running Automated HIL Test Suite (43 Test Cases)
 
 The HIL test suite is built natively on top of `pytest` and `ProbeRsClient`.
 
@@ -56,7 +56,7 @@ The HIL test suite is built natively on top of `pytest` and `ProbeRsClient`.
    cargo test --lib --target <host-target>
    ```
 
-2. **Run Full 30-Test Suite via Pytest:**
+2. **Run Full 43-Test Suite via Pytest:**
    ```bash
    pytest tools/test_hil.py
    ```
@@ -91,7 +91,7 @@ The HIL test suite is built natively on top of `pytest` and `ProbeRsClient`.
 
 ## 4. Test Framework Architecture
 
-- **Pytest HIL Suite (`tools/test_hil.py`, `tools/conftest.py`, `pytest.ini`):** 30 test cases grouped into classes for Suites 1-7, decorated with `pytest.mark.suiteX` and session-scoped fixtures `probe_client` / `hil_config`.
+- **Pytest HIL Suite (`tools/test_hil.py`, `tools/conftest.py`, `pytest.ini`):** 43 test cases grouped into classes for Suites 1-7, decorated with `pytest.mark.suiteX` and session-scoped fixtures `probe_client` / `hil_config`.
 - **Explicit Fixture Isolation (`flashed_rtt`, `flashed_blinky`, `flashed_fault` in `tools/conftest.py`):** Ensures target binaries are flashed as needed per test class, enabling isolated single-test runs (e.g. `pytest -k test_ts703_rtt_injection`) without depending on prior test execution sequence.
 - **Session-Level Flash Caching (`FlashTracker` in `tools/common.py`):** Automatically tracks the active binary image (`blinky`, `rtt`, `fault`) on the target MCU, skipping redundant flash programming operations across test cases to eliminate unnecessary NOR Flash wear.
 - **Atomic Execution Fixtures (`target_halted`, `target_reset_run` in `tools/conftest.py`):** Ensures CPU state (halt, breakpoints, execution registers) is isolated per test case and cleanly restored on teardown, enabling reliable single-test execution (`pytest -k test_ts403_single_step`).
@@ -162,9 +162,9 @@ You can also run manual debug operations directly using `probe-rs`:
 
 ## 7. Performance Metrics
 
-- **Full HIL Suite Execution Time:** **12.70 s** (30 test cases)
+- **Full HIL Suite Execution Time:** **15.05 s** (43 test cases)
 - **Single Test Isolation Execution:** **0.12 s**
 - **Flash Download Speed:** **165.98 KB/s**
 - **RAM Transfer Speed:** **10.36 KB/s**
-- **Pass Rate:** **30/30 (100% Passed)**
+- **Pass Rate:** **43/43 (100% Passed)**
 
