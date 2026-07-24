@@ -24,6 +24,10 @@ The firmware turns an nRF52840 microcontroller into an ARM Cortex-M SWD (Serial 
 |  | - CMSIS-DAP Endpoints  |      | - 64 MHz Precise Bit-Bang   |  |
 |  +------------------------+      +-----------------------------+  |
 |               |                                 |                 |
+|               +----------------+----------------+                 |
+|                                |                                  |
+|                      Central Config (config.rs)                   |
+|                      - Hardware & Timing Tokens                   |
 +---------------+---------------------------------+-----------------+
                 |                                 |
            LED (P0.15)                    SWD Lines (P0.17, P0.20, P0.22)
@@ -33,6 +37,24 @@ The firmware turns an nRF52840 microcontroller into an ARM Cortex-M SWD (Serial 
                                     |     Target MCU (nRF52840) |
                                     +---------------------------+
 ```
+
+---
+
+## ⚙️ Build Profile & Optimization
+
+The firmware binary is compiled with maximum optimization under `[profile.release]` in `Cargo.toml`:
+- `opt-level = 3` (high optimization for bit-banging throughput)
+- `codegen-units = 1` and `lto = 'fat'` (full link-time optimization and cross-module inlining)
+
+---
+
+## 🔧 Centralized Configuration (`src/config.rs`)
+
+All hardware pins, system clock frequencies, magic reset values, and USB descriptors are consolidated in `src/config.rs`:
+- **Hardware Pins:** `DEFAULT_SWDIO_PIN` (20), `DEFAULT_SWCLK_PIN` (17), `DEFAULT_NRESET_PIN` (22)
+- **Frequencies:** `DEFAULT_CPU_FREQUENCY` (64 MHz), `DEFAULT_MAX_SWD_FREQUENCY` (500 kHz)
+- **Reset Magic Values:** `GPREGRET_BOOTLOADER_CHECK` (`0xAB`), `DFU_MAGIC_UF2_RESET` (`0x57`), `APP_VTOR_OFFSET` (`0x0002_6000`)
+- **USB Constants:** `USB_VID` (`0x1209`), `USB_PID` (`0x4853`), `USB_MANUFACTURER`, `USB_PRODUCT`
 
 ---
 
@@ -46,23 +68,12 @@ The nice!nano v2 comes pre-flashed with the Adafruit UF2 Bootloader and Nordic S
 | `0x0000_0000 .. 0x0000_1000` | 4 KB | MBR (Master Boot Record) |
 | `0x0000_1000 .. 0x0002_6000` | 148 KB | SoftDevice S140 6.1.1 (reserved) |
 | **`0x0002_6000 .. 0x000F_4000`** | **824 KB** | **Application Flash (`FLASH`)** |
-| `0x000F_4000 .. 0x0010_0000` | 48 KB | Adafruit UF2 Bootloader + Settings |
+| `0x000F_4000 .. 0x0010_0000` | 4 KB | Adafruit UF2 Bootloader + Settings |
 | `0x2000_0000 .. 0x2004_0000` | 256 KB | System RAM (`RAM`) |
 
 ### Vector Table Relocation & Self-Reset
-1. **VTOR Relocation:** Since the application is linked at base `0x0002_6000`, the Cortex-M Vector Table Offset Register (`SCB.vtor`) is explicitly rewritten at application entry:
-   ```rust
-   cx.core.SCB.vtor.write(0x0002_6000);
-   ```
-2. **One-Time Self-Reset Handoff:** The Adafruit UF2 bootloader jumps into the application (`0x26000`) without resetting peripherals, leaving the internal nRF52840 USB 3.3V power regulator uninitialized (`POWER.USBREGSTATUS.OUTPUTRDY = 0`). To fix this, `init()` performs a one-time software reset guarded by `GPREGRET = 0xAB`:
-   ```rust
-   let power = unsafe { &*nrf52840_hal::pac::POWER::ptr() };
-   if power.gpregret.read().bits() != 0xAB {
-       power.gpregret.write(|w| unsafe { w.bits(0xAB) });
-       cortex_m::peripheral::SCB::sys_reset();
-   }
-   power.gpregret.write(|w| unsafe { w.bits(0) });
-   ```
+1. **VTOR Relocation:** Since the application is linked at base `0x0002_6000`, the Cortex-M Vector Table Offset Register (`SCB.vtor`) is rewritten at application entry using `APP_VTOR_OFFSET`.
+2. **One-Time Self-Reset Handoff:** The Adafruit UF2 bootloader jumps into the application without resetting peripherals, leaving the internal nRF52840 USB 3.3V power regulator uninitialized (`POWER.USBREGSTATUS.OUTPUTRDY = 0`). `init()` performs a one-time software reset guarded by `GPREGRET_BOOTLOADER_CHECK` (`0xAB`).
 
 ---
 
@@ -71,65 +82,46 @@ The nice!nano v2 comes pre-flashed with the Adafruit UF2 Bootloader and Nordic S
 The SWD driver implements high-speed bit-banging over GPIO without external hardware level translators.
 
 ### Pin Allocations & SwdPinConfig
-- **`SwdPinConfig` Layout:** Encapsulates target pin definitions (`P0.20` SWDIO, `P0.17` SWDCLK, `P0.22` nRESET) and system CPU frequency (`64_000_000` Hz) into a unified single-source-of-truth configuration structure.
-- **Centralized Initialization:** `SwdPinConfig::init_pins(p0_20, p0_17, p0_22)` initializes all probe signals with zero boilerplate.
-- **`SWDCLK` (`P0.17`):** Push-Pull output with **High Drive (`H0H1`)** mode for sharp pulse edges up to 8 MHz.
+- **`SwdPinConfig` Layout:** Encapsulates target pin definitions (`P0.20` SWDIO, `P0.17` SWDCLK, `P0.22` nRESET) and system CPU frequency (`64_000_000` Hz).
+- **`SWDCLK` (`P0.17`):** Push-Pull output with **High Drive (`H0H1`)** mode for sharp pulse edges.
 - **`SWDIO` (`P0.20`):** Dynamic bidirectional signal (Push-Pull **High Drive (`H0H1`)** output ⇄ Floating Pull-Up input).
 - **`nRESET` (`P0.22`):** Open-Drain output (`Standard0Disconnect1`) with target 3.3V pull-up.
 
-### Direct PAC Register Access & Bit-Bang Speed
-To achieve maximum throughput and zero HAL overhead during turnaround phases, pin direction, pin state toggling, and pin reads bypass high-level HAL abstractions and access `NRF_P0` registers directly using pre-computed bitmasks (`swclk_mask` and `mask`):
+### Fast Parity Calculation (`swd_parity`)
+Payload parity is calculated using native target popcount (`count_ones()`), compiling to single-cycle Cortex-M4 bit-count instructions:
 ```rust
-// Direct PAC register write for SWDCLK high/low transitions:
-let p0 = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-p0.outset.write(|w| unsafe { w.bits(swclk_mask) });
-p0.outclr.write(|w| unsafe { w.bits(swclk_mask) });
-
-// Set SWDIO to Input mode with Pull-up:
-p0.pin_cnf[20].write(|w| {
-    w.dir().input()
-     .input().connect()
-     .pull().pullup()
-     .drive().h0h1()
-});
-
-// Fast mask read of SWDIO pin state:
-let bit_is_high = (p0.in_.read().bits() & swdio_mask) != 0;
+#[inline(always)]
+pub fn swd_parity(data: u32) -> bool {
+    (data.count_ones() & 1) != 0
+}
 ```
 
-### CPU Frequency & Delays
-The nRF52840 CPU runs at **64 MHz** (`CPU_FREQUENCY = 64_000_000`). Half-period clock delay ticks are computed dynamically based on the requested target SWD frequency:
+### Direct PAC Register Access via `p0()` Helper
+To achieve maximum throughput during bit-banging, register access uses a zero-cost inline helper `p0()`:
 ```rust
-let ticks = (64_000_000 / (2 * target_freq_hz)).saturating_sub(4);
-cortex_m::asm::delay(ticks);
+#[inline(always)]
+fn p0() -> &'static nrf52840_hal::pac::p0::RegisterBlock {
+    unsafe { &*nrf52840_hal::pac::P0::ptr() }
+}
 ```
 
 ---
 
 ## 🔌 USB Stack & CMSIS-DAP (`src/usb.rs`)
 
-### Unique Hardware Serial Number
-The probe derives its 16-character hexadecimal USB serial number directly from the read-only hardware register `FICR.DEVICEID[0..1]`:
-```rust
-let deviceid0 = ficr.deviceid[0].read().bits();
-let deviceid1 = ficr.deviceid[1].read().bits();
-// Hex formatted string: "6a674c50f23e076c"
-```
-
 ### Protocol Endpoints & CDC Commands
-- **CMSIS-DAP v1 (HID):** Uses USB Human Interface Device class endpoints for maximum compatibility across operating systems without requiring custom drivers.
-- **CMSIS-DAP v2 (Vendor Bulk):** Uses high-speed raw Bulk endpoints for fast flash memory programming (achieving up to **165.98 KB/s** download speeds).
+- **CMSIS-DAP v1 (HID):** USB HID endpoints for universal cross-platform compatibility.
+- **CMSIS-DAP v2 (Vendor Bulk):** High-speed Bulk endpoints for fast flash programming.
 - **CDC Serial Commands:**
-  - `dfu` / `bootloader` / `reboot` / `1200 baud touch`: Software trigger into Adafruit UF2 DFU bootloader mode (`GPREGRET = 0x57`).
-  - `reset_target` / `target_reset` / `target-reset`: Asserts a 10 ms hardware `nRESET` pulse to restart the target MCU.
-  - Visual activity feedback via status LED (`PROBE_STATUS`).
+  - `dfu` / `bootloader` / `reboot` / `1200 baud touch`: Software trigger into Adafruit UF2 DFU bootloader mode (`DFU_MAGIC_UF2_RESET`).
+  - `reset_target` / `target_reset` / `target-reset`: Asserts a 10 ms hardware `nRESET` pulse.
+- **USBD Interrupt Encapsulation:** Low-level peripheral interrupt events are configured cleanly via `enable_usbd_interrupts()`.
 
 ---
 
 ## 🚦 RTIC 2 Concurrency Model (`src/bin/app.rs`)
 
-The firmware uses the **RTIC 2 (Real-Time Interrupt-driven Concurrency)** framework for zero-cost async multitasking:
-
-- **`USBD` Interrupt (Priority 2):** Handles USB bus events and receives CMSIS-DAP packets using a batching `while let` event loop to process all queued requests in a single ISR context.
-- **`idle` Task:** Serves background processing and CPU power-saving (`wfi`).
-- **`blink` Task (Priority 1):** Manages status LED (`P0.15`) state transitions (idle pulse, connected solid ON with 500ms sleep, active fast blink).
+The firmware uses the **RTIC 2** framework for zero-cost async multitasking:
+- **`USBD` Interrupt (Priority 2):** Polling USB events and dispatching CMSIS-DAP packets.
+- **`idle` Task:** CPU power-saving (`wfi`).
+- **`blink` Task (Priority 1):** Manages status LED (`P0.15`) state transitions.

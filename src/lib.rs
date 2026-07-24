@@ -5,6 +5,7 @@ use defmt_rtt as _;
 #[cfg(all(target_arch = "arm", not(test)))]
 use panic_probe as _;
 
+pub mod config;
 pub mod device_signature;
 pub mod swd;
 #[cfg(target_arch = "arm")]
@@ -30,7 +31,19 @@ pub type UsbBus = nrf52840_hal::usbd::Usbd<nrf52840_hal::usbd::UsbPeripheral<'st
 #[cfg(target_arch = "arm")]
 pub fn reset_to_bootloader() -> ! {
     let power = unsafe { &*nrf52840_hal::pac::POWER::ptr() };
-    power.gpregret.write(|w| unsafe { w.bits(0x57) });
+    power.gpregret.write(|w| unsafe { w.bits(config::DFU_MAGIC_UF2_RESET) });
     cortex_m::peripheral::SCB::sys_reset();
+}
+
+/// Perform a one-time software reset to re-arm VBUS detection and the USB 3.3V regulator
+/// when jumping from the Adafruit UF2 bootloader.
+#[cfg(target_arch = "arm")]
+pub fn perform_one_time_self_reset() {
+    let power = unsafe { &*nrf52840_hal::pac::POWER::ptr() };
+    if power.gpregret.read().bits() != config::GPREGRET_BOOTLOADER_CHECK {
+        power.gpregret.write(|w| unsafe { w.bits(config::GPREGRET_BOOTLOADER_CHECK) });
+        cortex_m::peripheral::SCB::sys_reset();
+    }
+    power.gpregret.write(|w| unsafe { w.bits(0) });
 }
 

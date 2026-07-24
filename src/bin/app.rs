@@ -12,9 +12,6 @@ use rusty_probe_nicenano as _; // global logger + panic handler + Mono/UsbBus
 /// SWD host. They are NOT the nice!nano on-board SWD/debug footprint (that one
 /// is for *flashing the nice!nano itself*); these are the pins we drive to talk
 /// to an external target. Change them here to match your wiring.
-/// Reported as DAP_Info "Firmware Version".
-const VERSION_STRING: &str = "nice!nano v2 CMSIS-DAP 0.1.0";
-
 #[rtic::app(device = nrf52840_hal::pac, dispatchers = [SWI0_EGU0, SWI1_EGU1])]
 mod app {
     use core::mem::MaybeUninit;
@@ -27,10 +24,9 @@ mod app {
     use nrf52840_hal::gpio::{p0, Level, Output, Pin, PushPull};
     use nrf52840_hal::usbd::UsbPeripheral;
     use rtic_monotonics::nrf::timer::prelude::*;
+    use rusty_probe_nicenano::config::{APP_VTOR_OFFSET, FIRMWARE_VERSION};
     use rusty_probe_nicenano::swd::{create_dap, DapHandler, SwdPinConfig, PROBE_STATUS};
     use rusty_probe_nicenano::{usb::ProbeUsb, Mono, UsbBus};
-
-    use super::{VERSION_STRING};
 
     /// HFXO-backed clocks, kept alive for `'static` so the USB peripheral can
     /// borrow them.
@@ -62,17 +58,11 @@ mod app {
         // stays 0 even though VBUS is present), so the device can never
         // enumerate. A software reset re-arms VBUS detection and the regulator.
         // We guard with GPREGRET so the reset happens exactly once.
-        {
-            let power = unsafe { &*nrf52840_hal::pac::POWER::ptr() };
-            if power.gpregret.read().bits() != 0xAB {
-                power.gpregret.write(|w| unsafe { w.bits(0xAB) });
-                cortex_m::peripheral::SCB::sys_reset();
-            }
-            power.gpregret.write(|w| unsafe { w.bits(0) });
-        }
+
+        rusty_probe_nicenano::perform_one_time_self_reset();
 
         unsafe {
-            cx.core.SCB.vtor.write(0x0002_6000);
+            cx.core.SCB.vtor.write(APP_VTOR_OFFSET);
         }
 
         let dp = cx.device;
@@ -106,7 +96,7 @@ mod app {
         // the chosen wiring and are also used in the log line below.
         let pin_cfg = SwdPinConfig::default();
         let pins = pin_cfg.init_pins(port0.p0_20, port0.p0_17, port0.p0_22);
-        let dap = create_dap(VERSION_STRING, pins.swdio, pins.swclk, pins.nreset, pin_cfg.cpu_frequency);
+        let dap = create_dap(FIRMWARE_VERSION, pins.swdio, pins.swclk, pins.nreset, pin_cfg.cpu_frequency);
         defmt::info!(
             "SWD backend initialised (SWDIO=P0.{}, SWDCLK=P0.{}, nRESET=P0.{})",
             pin_cfg.swdio_pin,
@@ -131,23 +121,7 @@ mod app {
 
         // nrf-usbd does not enable USBD interrupts itself; do it here so the
         // `USBD`-bound task fires. We only enable events that the driver clears.
-        unsafe {
-            let usbd = &*nrf52840_hal::pac::USBD::ptr();
-            usbd.intenset.write(|w| {
-                w.usbreset()
-                    .set_bit()
-                    .usbevent()
-                    .set_bit()
-                    .ep0setup()
-                    .set_bit()
-                    .ep0datadone()
-                    .set_bit()
-                    .epdata()
-                    .set_bit()
-                    .sof()
-                    .set_bit()
-            });
-        }
+        rusty_probe_nicenano::usb::enable_usbd_interrupts();
         defmt::info!("USB device started");
 
         blink::spawn().ok();
@@ -204,7 +178,7 @@ mod app {
         let dap = cx.local.dap;
 
         cx.shared.probe_usb.lock(|probe_usb| {
-            while let Some(request) = probe_usb.interrupt() {
+            if let Some(request) = probe_usb.interrupt() {
                 match request {
                     Request::DAP1Command((report, n)) => {
                         let len = dap.process_command(&report[..n], resp_buf, DapVersion::V1);

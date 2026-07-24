@@ -15,6 +15,7 @@ use dap_rs::usb_device::class_prelude::UsbBusAllocator;
 use dap_rs::usb_device::device::UsbDeviceState;
 use dap_rs::usb_device::{class_prelude::*, prelude::*};
 use usbd_serial::SerialPort;
+use rusty_probe_nicenano::config::APP_VTOR_OFFSET;
 use rusty_probe_nicenano::{Mono, UsbBus};
 
 type AppClocks = Clocks<ExternalOscillator, Internal, LfOscStopped>;
@@ -44,19 +45,10 @@ mod app {
         // regulator disabled (POWER.USBREGSTATUS.OUTPUTRDY stays 0 even though
         // VBUS is present). A software reset re-arms VBUS detection so the
         // regulator comes up. We guard with GPREGRET to reset exactly once.
-        {
-            let power = unsafe { &*nrf52840_hal::pac::POWER::ptr() };
-            if power.gpregret.read().bits() != 0xAB {
-                power.gpregret.write(|w| unsafe { w.bits(0xAB) });
-                cortex_m::peripheral::SCB::sys_reset();
-            }
-            // Clear the marker so every fresh entry into the app re-arms the
-            // regulator via a one-time self-reset.
-            power.gpregret.write(|w| unsafe { w.bits(0) });
-        }
+        rusty_probe_nicenano::perform_one_time_self_reset();
 
         unsafe {
-            cx.core.SCB.vtor.write(0x0002_6000);
+            cx.core.SCB.vtor.write(APP_VTOR_OFFSET);
         }
         let dp = cx.device;
         Mono::start(dp.TIMER1);
@@ -75,7 +67,7 @@ mod app {
             .manufacturer("diag")
             .product("CDC test")
             .serial_number("TEST");
-        let mut usb_dev = UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x1209, 0x4853))
+        let mut usb_dev = UsbDeviceBuilder::new(usb_alloc, UsbVidPid(rusty_probe_nicenano::config::USB_VID, rusty_probe_nicenano::config::USB_PID))
             .strings(&[descriptors])
             .unwrap()
             .device_class(0)
@@ -86,23 +78,7 @@ mod app {
             .composite_with_iads()
             .build();
 
-        unsafe {
-            let usbd = &*nrf52840_hal::pac::USBD::ptr();
-            usbd.intenset.write(|w| {
-                w.usbreset()
-                    .set_bit()
-                    .usbevent()
-                    .set_bit()
-                    .ep0setup()
-                    .set_bit()
-                    .ep0datadone()
-                    .set_bit()
-                    .epdata()
-                    .set_bit()
-                    .sof()
-                    .set_bit()
-            });
-        }
+        rusty_probe_nicenano::usb::enable_usbd_interrupts();
 
         // Kick-start the bus (first poll enables + pulls up D+).
         {

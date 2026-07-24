@@ -19,9 +19,6 @@ pub struct ProbeUsb {
     serial: SerialPort<'static, UsbBus>,
 }
 
-const MANUFACTURER: &str = "Probe-rs development team";
-const PRODUCT: &str = "Rusty Probe (nice!nano) with CMSIS-DAP v1/v2 Support";
-
 impl ProbeUsb {
     #[inline(always)]
     pub fn new(usb_bus: &'static UsbBusAllocator<UsbBus>) -> Self {
@@ -35,16 +32,16 @@ impl ProbeUsb {
         info!("Device ID: {}", id);
 
         let descriptors_en = StringDescriptors::new(LangID::EN)
-            .manufacturer(MANUFACTURER)
-            .product(PRODUCT)
+            .manufacturer(crate::config::USB_MANUFACTURER)
+            .product(crate::config::USB_PRODUCT)
             .serial_number(id);
 
         let descriptors_en_us = StringDescriptors::new(LangID::EN_US)
-            .manufacturer(MANUFACTURER)
-            .product(PRODUCT)
+            .manufacturer(crate::config::USB_MANUFACTURER)
+            .product(crate::config::USB_PRODUCT)
             .serial_number(id);
 
-        let device = UsbDeviceBuilder::new(usb_bus, UsbVidPid(0x1209, 0x4853))
+        let device = UsbDeviceBuilder::new(usb_bus, UsbVidPid(crate::config::USB_VID, crate::config::USB_PID))
             .strings(&[descriptors_en, descriptors_en_us])
             .expect("Failed to set USB string descriptors")
             .device_class(0)
@@ -107,7 +104,7 @@ impl ProbeUsb {
     fn check_cdc_commands(&mut self) {
         let mut buf = [0u8; 64];
         if let Ok(count) = self.serial.read(&mut buf) {
-            if count >= 3 && count <= 32 {
+            if (3..=32).contains(&count) {
                 if let Ok(s) = core::str::from_utf8(&buf[..count]) {
                     let cmd = s.trim();
                     if cmd.eq_ignore_ascii_case("dfu")
@@ -136,15 +133,33 @@ impl ProbeUsb {
 
     /// Transmit a DAP report back over the DAPv1 HID interface.
     pub fn dap1_reply(&mut self, data: &[u8]) {
-        self.dap_v1
-            .write_packet(data)
-            .expect("DAPv1 EP write failed");
+        let _ = self.dap_v1.write_packet(data);
     }
 
     /// Transmit a DAP report back over the DAPv2 bulk interface.
     pub fn dap2_reply(&mut self, data: &[u8]) {
-        self.dap_v2
-            .write_packet(data)
-            .expect("DAPv2 EP write failed");
+        let _ = self.dap_v2.write_packet(data);
+    }
+}
+
+/// Enable USBD peripheral interrupts required by `nrf-usbd`.
+#[cfg(target_arch = "arm")]
+pub fn enable_usbd_interrupts() {
+    unsafe {
+        let usbd = &*nrf52840_hal::pac::USBD::ptr();
+        usbd.intenset.write(|w| {
+            w.usbreset()
+                .set_bit()
+                .usbevent()
+                .set_bit()
+                .ep0setup()
+                .set_bit()
+                .ep0datadone()
+                .set_bit()
+                .epdata()
+                .set_bit()
+                .sof()
+                .set_bit()
+        });
     }
 }

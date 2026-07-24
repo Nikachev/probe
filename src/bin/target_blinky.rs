@@ -19,6 +19,8 @@ use embedded_hal::digital::OutputPin;
 use nrf52840_hal as hal;
 use panic_probe as _;
 
+use rusty_probe_nicenano::config::{APP_VTOR_OFFSET, DEFAULT_CPU_FREQUENCY};
+
 #[cfg(target_arch = "arm")]
 #[link_section = ".boot_vectors"]
 #[no_mangle]
@@ -36,10 +38,8 @@ pub static mut TEST_COUNTER: u32 = 0;
 #[no_mangle]
 pub static mut SRAM_TEST_BUFFER: [u8; 256] = [0xAA; 256];
 
-const CYCLES_PER_MS: u32 = 64_000;
-
 fn delay_ms(ms: u32) {
-    cortex_m::asm::delay(CYCLES_PER_MS * ms);
+    cortex_m::asm::delay((DEFAULT_CPU_FREQUENCY / 1000) * ms);
 }
 
 #[entry]
@@ -47,7 +47,7 @@ fn main() -> ! {
     // Application is linked at 0x26000 (after Adafruit UF2 Bootloader + SoftDevice S140).
     unsafe {
         let cp = cortex_m::Peripherals::steal();
-        cp.SCB.vtor.write(0x0002_6000);
+        cp.SCB.vtor.write(APP_VTOR_OFFSET);
     }
 
     let dp = hal::pac::Peripherals::take().unwrap();

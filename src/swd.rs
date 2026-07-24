@@ -89,36 +89,33 @@ impl SwdPinConfig {
 
 #[cfg(target_arch = "arm")]
 pub struct SwdioPin {
-    pin: Pin<Output<PushPull>>,
+    pin_num: u8,
     mask: u32,
 }
-
 
 #[cfg(target_arch = "arm")]
 impl SwdioPin {
     pub fn new(pin: Pin<Output<PushPull>>) -> Self {
         let pin_num = pin.pin();
         let mask = 1 << pin_num;
-        Self { pin, mask }
+        Self { pin_num, mask }
     }
 
     #[inline(always)]
     fn set_input(&mut self) {
-        let pin_num = self.pin.pin();
         let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.pin_cnf[pin_num as usize].write(|w| {
+        port.pin_cnf[self.pin_num as usize].write(|w| {
             w.dir().input()
              .input().connect()
              .pull().pullup()
-             .drive().s0s1()
+             .drive().h0h1()
         });
     }
 
     #[inline(always)]
     fn set_output(&mut self) {
-        let pin_num = self.pin.pin();
         let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.pin_cnf[pin_num as usize].write(|w| {
+        port.pin_cnf[self.pin_num as usize].write(|w| {
             w.dir().output()
              .input().connect()
              .pull().disabled()
@@ -298,7 +295,7 @@ impl swj::Dependencies<Swd, Jtag> for Context {
         // Cap to something we can realistically meet on a 64 MHz core.
         let max_frequency = max_frequency.min(5_000_000);
         self.max_frequency = max_frequency;
-        self.half_period_ticks = (self.cpu_frequency / max_frequency / 2).max(1);
+        self.half_period_ticks = calculate_half_period_ticks(self.cpu_frequency, max_frequency);
         true
     }
 
@@ -467,7 +464,6 @@ impl Swd {
 
     fn rx4(&mut self) -> u8 {
         self.0.swdio_to_input();
-        asm::delay(self.0.half_period_ticks);
         let mut data = 0;
         for i in 0..4 {
             data |= (self.read_bit() & 1) << i;
@@ -477,7 +473,6 @@ impl Swd {
 
     fn rx5(&mut self) -> u8 {
         self.0.swdio_to_input();
-        asm::delay(self.0.half_period_ticks);
         let mut data = 0;
         for i in 0..5 {
             data |= (self.read_bit() & 1) << i;
@@ -496,7 +491,6 @@ impl Swd {
 
     fn read_data(&mut self) -> (u32, bool) {
         self.0.swdio_to_input();
-        asm::delay(self.0.half_period_ticks);
         let mut data = 0u32;
         for i in 0..32 {
             data |= (self.read_bit() as u32) << i;
@@ -524,8 +518,8 @@ impl Swd {
         let hp = self.0.half_period_ticks;
         self.0.set_swclk_low();
         asm::delay(hp);
-        self.0.set_swclk_high();
         let bit = self.0.swdio.is_high() as u8;
+        self.0.set_swclk_high();
         asm::delay(hp);
         bit
     }
@@ -644,6 +638,7 @@ pub fn create_dap(
     nreset: Pin<Output<OpenDrainIO>>,
     cpu_frequency: u32,
 ) -> DapHandler {
+    pulse_target_nreset();
     let swdio = SwdioPin::new(swdio);
     let context = Context::with_frequency(swdio, swclk, nreset, cpu_frequency, DEFAULT_MAX_FREQUENCY);
     let wait = Wait { cpu_frequency };
@@ -657,14 +652,15 @@ pub fn swd_parity(data: u32) -> bool {
     data.count_ones() % 2 != 0
 }
 
-/// Assert a 10 ms hardware reset pulse on the target nRESET line (P0.22).
+/// Assert a 10 ms hardware reset pulse on the target nRESET line.
 pub fn pulse_target_nreset() {
     #[cfg(target_arch = "arm")]
     {
+        let pin_mask = 1 << SwdPinConfig::default().nreset_pin;
         let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.outclr.write(|w| unsafe { w.bits(1 << 22) });
+        port.outclr.write(|w| unsafe { w.bits(pin_mask) });
         cortex_m::asm::delay(640_000);
-        port.outset.write(|w| unsafe { w.bits(1 << 22) });
+        port.outset.write(|w| unsafe { w.bits(pin_mask) });
     }
 }
 

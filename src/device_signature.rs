@@ -34,9 +34,9 @@ pub fn device_id_hex() -> &'static str {
         let id0 = ficr.deviceid[0].read().bits();
         let id1 = ficr.deviceid[1].read().bits();
 
-        let mut bytes = [0u8; 8];
-        bytes[0..4].copy_from_slice(&id0.to_be_bytes());
-        bytes[4..8].copy_from_slice(&id1.to_be_bytes());
+        let b0 = id0.to_be_bytes();
+        let b1 = id1.to_be_bytes();
+        let bytes = [b0[0], b0[1], b0[2], b0[3], b1[0], b1[1], b1[2], b1[3]];
 
         let out = bytes_to_hex_16(&bytes);
 
