@@ -33,8 +33,8 @@ pub enum HostStatus {
 }
 
 #[cfg(target_arch = "arm")]
-/// Default SWD clock: 500 kHz. The host may lower/raise this via DAP_SWJ_Clock.
-const DEFAULT_MAX_FREQUENCY: u32 = 500_000;
+/// Default SWD clock: 5 MHz (5,000,000 Hz). The host may lower/raise this via DAP_SWJ_Clock.
+const DEFAULT_MAX_FREQUENCY: u32 = 5_000_000;
 
 
 /// SWD pin configuration layout for nice!nano v2.
@@ -671,6 +671,7 @@ mod tests {
     #[test]
     fn test_calculate_half_period_ticks() {
         let cpu_freq = 64_000_000;
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 5_000_000), 6);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 2_000_000), 16);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 1_000_000), 32);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 500_000), 64);

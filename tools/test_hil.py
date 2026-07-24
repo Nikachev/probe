@@ -53,11 +53,52 @@ class TestSuite1Initialization:
 class TestSuite2SWDProtocol:
     """Suite 2: Low-Level SWD Protocol Bit-Bang & Timing."""
 
-    @pytest.mark.parametrize("speed", ["100", "1000"])
+    @pytest.mark.parametrize("speed", ["50", "100", "500", "1000", "2000", "5000", "10000"])
     def test_ts201_frequency_scaling(self, probe_client, speed):
-        """TS-201: SWD Frequency Scaling (100 kHz & 1000 kHz)."""
+        """TS-201: SWD Frequency Scaling & Boundary Testing (50 kHz to 5000+ kHz)."""
         code, _, err, _ = probe_client.info(speed=speed)
         assert code == 0, f"Frequency scaling at {speed}kHz failed: {err}"
+
+    @pytest.mark.parametrize("speed", ["100", "5000"])
+    def test_ts201_ram_access_min_max_freq(self, probe_client, hil_config, speed):
+        """TS-201: RAM Read/Write Data Integrity at MIN (100 kHz) & MAX (5000 kHz) Frequencies."""
+        addr = hil_config.ram_test_addr
+        pattern = hil_config.word_pattern_1 if speed == "100" else hil_config.word_pattern_2
+        probe_client.write_and_verify("b32", addr, f"0x{pattern:08X}", speed=speed)
+        probe_client.read_u32_expect(addr, pattern, msg=f"RAM read/write at {speed}kHz", speed=speed)
+
+    @pytest.mark.parametrize("speed", ["100", "5000"])
+    def test_ts201_bulk_transfer_min_max_freq(self, probe_client, hil_config, record_property, speed):
+        """TS-201: Bulk Memory Transfer Data Integrity at MIN (100 kHz) & MAX (5000 kHz) Frequencies."""
+        addr = hil_config.ram_test_addr
+        pattern_words = ["0x{:08X}".format((i * 0x01020304 + int(speed)) & 0xFFFFFFFF) for i in range(16)]
+        t0 = time.time()
+        probe_client.write_and_verify("b32", addr, pattern_words, speed=speed)
+        code, vals, err, duration = probe_client.read_words_vals(addr, 16, speed=speed)
+        elapsed = time.time() - t0
+        assert code == 0, f"Bulk read at {speed}kHz failed: {err}"
+        assert len(vals) == 16, f"Expected 16 words from bulk read at {speed}kHz, got {len(vals)}"
+        
+        # Telemetry: Record RAM transfer bandwidth for given speed
+        kb_transferred = (16 * 4) / 1024.0
+        kbps = kb_transferred / elapsed if elapsed > 0 else 0
+        record_property(f"ram_throughput_kbps_{speed}khz", f"{kbps:.2f}")
+        assert kbps > 0.05, f"RAM transfer throughput at {speed}kHz below SLA threshold: {kbps:.2f} KB/s"
+
+    @pytest.mark.parametrize("speed", ["100", "5000"])
+    def test_ts201_flash_min_max_freq(self, probe_client, hil_config, speed):
+        """TS-201: Flash Flashing & Byte-for-Byte Verification at MIN (100 kHz) & MAX (5000 kHz)."""
+        elf_path = os.path.join(hil_config.targets_dir, "target_blinky.elf")
+        code, _, err, _ = probe_client.download(elf_path, verify=True, force=True, speed=speed)
+        assert code == 0, f"Flash programming and verification at {speed}kHz failed: {err}"
+
+    @pytest.mark.parametrize("speed", ["100", "5000"])
+    def test_ts201_cpu_control_min_max_freq(self, probe_client, hil_config, speed):
+        """TS-201: CoreSight Register Access (DHCSR/DEMCR) & Reset at MIN (100 kHz) & MAX (5000 kHz)."""
+        val = probe_client.read_u32_expect(hil_config.dhcsr_addr, msg=f"DHCSR access at {speed}kHz", speed=speed)
+        assert val is not None, f"DHCSR read at {speed}kHz returned None"
+        reset_code, _, reset_err, _ = probe_client.reset(speed=speed)
+        assert reset_code == 0, f"Target reset at {speed}kHz failed: {reset_err}"
 
     def test_ts202_swdio_direction_switch(self, probe_client, hil_config):
         """TS-202: SWDIO Dynamic Direction Switch Verification."""

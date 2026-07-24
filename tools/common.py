@@ -130,21 +130,46 @@ def ensure_targets_built(targets_dir=TARGETS_DIR):
             raise FileNotFoundError(f"Build script {build_script} not found!")
 
 
+import hashlib
+
+
 class FlashTracker:
-    """Global session-level tracker for currently flashed binary image on target MCU."""
+    """Global session-level tracker for currently flashed binary image and its SHA256 hash on target MCU."""
     _current_elf = None
+    _current_sha256 = None
 
     @classmethod
-    def get_current(cls):
-        return cls._current_elf
+    def compute_sha256(cls, elf_path: str) -> str:
+        if not elf_path or not os.path.exists(elf_path):
+            return ""
+        hasher = hashlib.sha256()
+        with open(elf_path, "rb") as f:
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+        return hasher.hexdigest()
 
     @classmethod
-    def set_current(cls, elf_path):
-        cls._current_elf = os.path.abspath(elf_path) if elf_path else None
+    def is_cached(cls, elf_path: str) -> bool:
+        if not cls._current_elf or not cls._current_sha256:
+            return False
+        abs_path = os.path.abspath(elf_path)
+        if cls._current_elf != abs_path:
+            return False
+        return cls._current_sha256 == cls.compute_sha256(abs_path)
+
+    @classmethod
+    def set_current(cls, elf_path: str):
+        if elf_path:
+            abs_path = os.path.abspath(elf_path)
+            cls._current_elf = abs_path
+            cls._current_sha256 = cls.compute_sha256(abs_path)
+        else:
+            cls.invalidate()
 
     @classmethod
     def invalidate(cls):
         cls._current_elf = None
+        cls._current_sha256 = None
 
 
 class ProbeRsClient:
@@ -194,16 +219,26 @@ class ProbeRsClient:
             cmd.extend(["--speed", str(speed)])
         return self.run_raw(cmd)
 
-    def read(self, width="b32", addr=None, count=1):
+    def info(self, speed=None):
+        cmd = ["info", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
+        if speed:
+            cmd.extend(["--speed", str(speed)])
+        return self.run_raw(cmd)
+
+    def read(self, width="b32", addr=None, count=1, speed=None):
         if addr is None:
             addr = self.config.ram_test_addr
-        return self.run_raw(["read", width, "--chip", self.config.target_chip, "--probe", self.config.probe_identifier, addr, str(count)])
+        cmd = ["read", width, "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
+        if speed:
+            cmd.extend(["--speed", str(speed)])
+        cmd.extend([addr, str(count)])
+        return self.run_raw(cmd)
 
-    def read_u32_val(self, addr=None):
+    def read_u32_val(self, addr=None, speed=None):
         """Read single 32-bit word from address and return parsed integer value."""
         if addr is None:
             addr = self.config.ram_test_addr
-        code, out, err, duration = self.read("b32", addr, 1)
+        code, out, err, duration = self.read("b32", addr, 1, speed=speed)
         if code != 0:
             return code, None, out, err
         words = parse_hex_words(out, ignore_addr=addr)
@@ -211,9 +246,9 @@ class ProbeRsClient:
         val = words[-1] if words else None
         return code, val, out, err
 
-    def read_u32_expect(self, addr=None, expected_val=None, msg=""):
+    def read_u32_expect(self, addr=None, expected_val=None, msg="", speed=None):
         """Read a single 32-bit word, assert code == 0, and verify expected_val if provided."""
-        code, val, out, err = self.read_u32_val(addr)
+        code, val, out, err = self.read_u32_val(addr, speed=speed)
         assert code == 0, f"{msg} Read command failed: {err}"
         if expected_val is not None:
             exp_hex = f"0x{expected_val:08X}" if isinstance(expected_val, int) else str(expected_val)
@@ -221,11 +256,11 @@ class ProbeRsClient:
             assert val == expected_val, f"{msg} Value mismatch at {addr}: expected {exp_hex}, got {act_hex} (out='{out}')"
         return val
 
-    def read_words_vals(self, addr=None, count=1):
+    def read_words_vals(self, addr=None, count=1, speed=None):
         """Read count 32-bit words from address and return parsed list of integers."""
         if addr is None:
             addr = self.config.ram_test_addr
-        code, out, err, duration = self.read("b32", addr, count)
+        code, out, err, duration = self.read("b32", addr, count, speed=speed)
         if code != 0:
             return code, [], out, err
         words = parse_hex_words(out, ignore_addr=addr)
@@ -234,44 +269,50 @@ class ProbeRsClient:
             words = words[-count:]
         return code, words, out, err
 
-    def write_and_verify(self, width="b32", addr=None, values=None):
+    def write_and_verify(self, width="b32", addr=None, values=None, speed=None):
         """Write values and assert operation succeeded."""
         if addr is None:
             addr = self.config.ram_test_addr
-        w_code, _, w_err, _ = self.write(width, addr, values)
+        w_code, _, w_err, _ = self.write(width, addr, values, speed=speed)
         assert w_code == 0, f"Write {width} to {addr} failed: {w_err}"
 
-    def read_and_verify_erased(self, addr=None, count=4):
+    def read_and_verify_erased(self, addr=None, count=4, speed=None):
         """Read count 32-bit words from Flash address and verify all words equal 0xFFFFFFFF."""
         if addr is None:
             addr = self.config.flash_check_addr
-        code, words, out, err = self.read_words_vals(addr, count)
+        code, words, out, err = self.read_words_vals(addr, count, speed=speed)
         assert code == 0, f"Read flash at {addr} failed: {err}"
         assert len(words) >= count, f"Expected at least {count} words from {addr}, got {len(words)} ({out})"
         for idx, w in enumerate(words[:count]):
             assert w == 0xFFFFFFFF, f"Flash memory at {addr}+{idx*4} is not erased: expected 0xFFFFFFFF, got 0x{w:08X}"
 
-    def read_dhcsr_val(self):
+    def read_dhcsr_val(self, speed=None):
         """Read DHCSR register and return parsed u32 integer value."""
-        code, val, out, err = self.read_u32_val(self.config.dhcsr_addr)
+        code, val, out, err = self.read_u32_val(self.config.dhcsr_addr, speed=speed)
         return code, val, out, err
 
-    def read_demcr_val(self):
+    def read_demcr_val(self, speed=None):
         """Read DEMCR register and return parsed u32 integer value."""
-        code, val, out, err = self.read_u32_val(self.config.demcr_addr)
+        code, val, out, err = self.read_u32_val(self.config.demcr_addr, speed=speed)
         return code, val, out, err
 
-    def write(self, width="b32", addr=None, values=None):
+    def write(self, width="b32", addr=None, values=None, speed=None):
         if addr is None:
             addr = self.config.ram_test_addr
         if values is None:
             values = []
         if isinstance(values, str):
             values = [values]
-        return self.run_raw(["write", width, "--chip", self.config.target_chip, "--probe", self.config.probe_identifier, addr] + values)
+        cmd = ["write", width, "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
+        if speed:
+            cmd.extend(["--speed", str(speed)])
+        cmd.extend([addr] + values)
+        return self.run_raw(cmd)
 
-    def reset(self, connect_under_reset=False):
+    def reset(self, connect_under_reset=False, speed=None):
         cmd = ["reset", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
+        if speed:
+            cmd.extend(["--speed", str(speed)])
         if connect_under_reset:
             cmd.append("--connect-under-reset")
         code, out, err, duration = self.run_raw(cmd)
@@ -281,16 +322,21 @@ class ProbeRsClient:
                 return 0, out, err, duration
         return code, out, err, duration
 
-    def erase(self):
+    def erase(self, speed=None):
         FlashTracker.invalidate()
-        return self.run_raw(["erase", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier])
+        cmd = ["erase", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
+        if speed:
+            cmd.extend(["--speed", str(speed)])
+        return self.run_raw(cmd)
 
-    def download(self, elf_path, verify=False, force=False):
+    def download(self, elf_path, verify=False, force=False, speed=None):
         abs_path = os.path.abspath(elf_path)
-        if not force and not verify and FlashTracker.get_current() == abs_path:
-            return 0, "Already flashed (cached)", "", 0.0
+        if not force and not verify and FlashTracker.is_cached(abs_path):
+            return 0, "Already flashed (SHA256 cached)", "", 0.0
 
         cmd = ["download", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
+        if speed:
+            cmd.extend(["--speed", str(speed)])
         if verify:
             cmd.append("--verify")
         cmd.append(elf_path)
@@ -299,14 +345,17 @@ class ProbeRsClient:
             FlashTracker.set_current(abs_path)
         return res
 
-    def run_target(self, elf_path, duration=2.0, expected_tag=None, skip_download=False):
+    def run_target(self, elf_path, duration=2.0, expected_tag=None, skip_download=False, speed=None):
         """Run target binary, reading output reactively using selectors until expected_tag or duration timeout."""
         import selectors
         if not self.probe_rs_cli:
             return -1, "", "probe-rs CLI not found in PATH", 0.0
         if not skip_download:
-            self.download(elf_path)
-        cmd = [self.probe_rs_cli, "run", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier, elf_path, "--rtt-scan-memory"]
+            self.download(elf_path, speed=speed)
+        cmd = [self.probe_rs_cli, "run", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
+        if speed:
+            cmd.extend(["--speed", str(speed)])
+        cmd.extend([elf_path, "--rtt-scan-memory"])
         start = time.time()
         p = None
         stdout_chunks, stderr_chunks = [], []

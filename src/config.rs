@@ -27,8 +27,8 @@ pub const DFU_MAGIC_UF2_RESET: u32 = 0x57;
 /// Default SWD CPU clock frequency for nRF52840 (64 MHz).
 pub const DEFAULT_CPU_FREQUENCY: u32 = 64_000_000;
 
-/// Default SWD target clock frequency (500 kHz).
-pub const DEFAULT_MAX_SWD_FREQUENCY: u32 = 500_000;
+/// Default SWD target clock frequency (5 MHz).
+pub const DEFAULT_MAX_SWD_FREQUENCY: u32 = 5_000_000;
 
 /// Pin numbers for nice!nano v2 SWD probe interface.
 pub const DEFAULT_SWDIO_PIN: u8 = 20;
