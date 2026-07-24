@@ -102,31 +102,32 @@ impl ProbeUsb {
 
     #[inline(always)]
     fn check_cdc_commands(&mut self) {
-        let mut buf = [0u8; 64];
-        if let Ok(count) = self.serial.read(&mut buf) {
-            if (3..=32).contains(&count) {
-                if let Ok(s) = core::str::from_utf8(&buf[..count]) {
-                    let cmd = s.trim();
-                    if cmd.eq_ignore_ascii_case("dfu")
-                        || cmd.eq_ignore_ascii_case("bootloader")
-                        || cmd.eq_ignore_ascii_case("reset")
-                        || cmd.eq_ignore_ascii_case("reboot")
-                        || cmd.eq_ignore_ascii_case("boot")
-                    {
-                        crate::swd::PROBE_STATUS.store(2, core::sync::atomic::Ordering::Relaxed);
-                        defmt::info!("CDC DFU command received ('{}') -> resetting to UF2 bootloader", cmd);
-                        let _ = self.serial.write(b"Resetting to UF2 bootloader...\r\n");
-                        crate::reset_to_bootloader();
-                    } else if cmd.eq_ignore_ascii_case("reset_target")
-                        || cmd.eq_ignore_ascii_case("target_reset")
-                        || cmd.eq_ignore_ascii_case("target-reset")
-                    {
-                        crate::swd::PROBE_STATUS.store(2, core::sync::atomic::Ordering::Relaxed);
-                        defmt::info!("CDC target reset command received ('{}') -> pulsing nRESET", cmd);
-                        let _ = self.serial.write(b"Pulsing nRESET on target MCU...\r\n");
-                        crate::swd::pulse_target_nreset();
-                    }
-                }
+        let mut buf = [0u8; 32];
+        let count = match self.serial.read(&mut buf) {
+            Ok(n) if (3..=32).contains(&n) => n,
+            _ => return,
+        };
+
+        if let Ok(s) = core::str::from_utf8(&buf[..count]) {
+            let cmd = s.trim();
+            if cmd.eq_ignore_ascii_case("dfu")
+                || cmd.eq_ignore_ascii_case("bootloader")
+                || cmd.eq_ignore_ascii_case("reset")
+                || cmd.eq_ignore_ascii_case("reboot")
+                || cmd.eq_ignore_ascii_case("boot")
+            {
+                crate::swd::PROBE_STATUS.store(2, core::sync::atomic::Ordering::Relaxed);
+                defmt::info!("CDC DFU command received ('{}') -> resetting to UF2 bootloader", cmd);
+                let _ = self.serial.write(b"Resetting to UF2 bootloader...\r\n");
+                crate::reset_to_bootloader();
+            } else if cmd.eq_ignore_ascii_case("reset_target")
+                || cmd.eq_ignore_ascii_case("target_reset")
+                || cmd.eq_ignore_ascii_case("target-reset")
+            {
+                crate::swd::PROBE_STATUS.store(2, core::sync::atomic::Ordering::Relaxed);
+                defmt::info!("CDC target reset command received ('{}') -> pulsing nRESET", cmd);
+                let _ = self.serial.write(b"Pulsing nRESET on target MCU...\r\n");
+                crate::swd::pulse_target_nreset();
             }
         }
     }

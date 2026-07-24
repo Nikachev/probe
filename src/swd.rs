@@ -88,8 +88,13 @@ impl SwdPinConfig {
 }
 
 #[cfg(target_arch = "arm")]
+#[inline(always)]
+fn p0_reg() -> &'static nrf52840_hal::pac::p0::RegisterBlock {
+    unsafe { &*nrf52840_hal::pac::P0::ptr() }
+}
+
+#[cfg(target_arch = "arm")]
 pub struct SwdioPin {
-    pin_num: u8,
     mask: u32,
 }
 
@@ -98,47 +103,38 @@ impl SwdioPin {
     pub fn new(pin: Pin<Output<PushPull>>) -> Self {
         let pin_num = pin.pin();
         let mask = 1 << pin_num;
-        Self { pin_num, mask }
-    }
-
-    #[inline(always)]
-    fn set_input(&mut self) {
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.pin_cnf[self.pin_num as usize].write(|w| {
-            w.dir().input()
+        p0_reg().pin_cnf[pin_num as usize].write(|w| {
+            w.dir().output()
              .input().connect()
              .pull().pullup()
              .drive().h0h1()
         });
+        Self { mask }
+    }
+
+    #[inline(always)]
+    fn set_input(&mut self) {
+        p0_reg().dirclr.write(|w| unsafe { w.bits(self.mask) });
     }
 
     #[inline(always)]
     fn set_output(&mut self) {
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.pin_cnf[self.pin_num as usize].write(|w| {
-            w.dir().output()
-             .input().connect()
-             .pull().disabled()
-             .drive().h0h1()
-        });
+        p0_reg().dirset.write(|w| unsafe { w.bits(self.mask) });
     }
 
     #[inline(always)]
     fn set_high(&mut self) {
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.outset.write(|w| unsafe { w.bits(self.mask) });
+        p0_reg().outset.write(|w| unsafe { w.bits(self.mask) });
     }
 
     #[inline(always)]
     fn set_low(&mut self) {
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.outclr.write(|w| unsafe { w.bits(self.mask) });
+        p0_reg().outclr.write(|w| unsafe { w.bits(self.mask) });
     }
 
     #[inline(always)]
     fn is_high(&self) -> bool {
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        (port.in_.read().bits() & self.mask) != 0
+        (p0_reg().in_.read().bits() & self.mask) != 0
     }
 }
 
@@ -154,12 +150,14 @@ pub struct Context {
     half_period_ticks: u32,
 }
 
-/// Calculate half-period cycle delay ticks for SWCLK generation based on CPU and target clock frequencies.
+/// Calculate half-period delay iterations for `cortex_m::asm::delay` based on CPU and target clock frequencies.
+/// Note: On Cortex-M4, `asm::delay(n)` runs a 3-cycle loop (`subs; bne`), taking `3 * n` cycles.
 pub fn calculate_half_period_ticks(cpu_frequency: u32, max_frequency: u32) -> u32 {
     if max_frequency == 0 {
         return 1;
     }
-    (cpu_frequency / max_frequency / 2).max(1)
+    let half_cycles = cpu_frequency / max_frequency / 2;
+    (half_cycles / 3).max(1)
 }
 
 #[cfg(target_arch = "arm")]
@@ -173,8 +171,7 @@ impl Context {
         max_frequency: u32,
     ) -> Self {
         let pin_num = swclk.pin();
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.pin_cnf[pin_num as usize].write(|w| {
+        p0_reg().pin_cnf[pin_num as usize].write(|w| {
             w.dir().output()
              .input().connect()
              .pull().disabled()
@@ -196,14 +193,12 @@ impl Context {
 
     #[inline(always)]
     fn set_swclk_high(&mut self) {
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.outset.write(|w| unsafe { w.bits(self.swclk_mask) });
+        p0_reg().outset.write(|w| unsafe { w.bits(self.swclk_mask) });
     }
 
     #[inline(always)]
     fn set_swclk_low(&mut self) {
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.outclr.write(|w| unsafe { w.bits(self.swclk_mask) });
+        p0_reg().outclr.write(|w| unsafe { w.bits(self.swclk_mask) });
     }
 
     fn swdio_to_input(&mut self) {
@@ -454,6 +449,7 @@ impl swd::Swd<Context> for Swd {
 
 #[cfg(target_arch = "arm")]
 impl Swd {
+    #[inline(always)]
     fn tx8(&mut self, mut data: u8) {
         self.0.swdio_to_output();
         for _ in 0..8 {
@@ -462,6 +458,7 @@ impl Swd {
         }
     }
 
+    #[inline(always)]
     fn rx4(&mut self) -> u8 {
         self.0.swdio_to_input();
         let mut data = 0;
@@ -471,6 +468,7 @@ impl Swd {
         data
     }
 
+    #[inline(always)]
     fn rx5(&mut self) -> u8 {
         self.0.swdio_to_input();
         let mut data = 0;
@@ -480,6 +478,7 @@ impl Swd {
         data
     }
 
+    #[inline(always)]
     fn send_data(&mut self, mut data: u32, parity: bool) {
         self.0.swdio_to_output();
         for _ in 0..32 {
@@ -489,6 +488,7 @@ impl Swd {
         self.write_bit(parity as u8);
     }
 
+    #[inline(always)]
     fn read_data(&mut self) -> (u32, bool) {
         self.0.swdio_to_input();
         let mut data = 0u32;
@@ -657,10 +657,9 @@ pub fn pulse_target_nreset() {
     #[cfg(target_arch = "arm")]
     {
         let pin_mask = 1 << SwdPinConfig::default().nreset_pin;
-        let port = unsafe { &*nrf52840_hal::pac::P0::ptr() };
-        port.outclr.write(|w| unsafe { w.bits(pin_mask) });
+        p0_reg().outclr.write(|w| unsafe { w.bits(pin_mask) });
         cortex_m::asm::delay(640_000);
-        port.outset.write(|w| unsafe { w.bits(pin_mask) });
+        p0_reg().outset.write(|w| unsafe { w.bits(pin_mask) });
     }
 }
 
@@ -671,16 +670,16 @@ mod tests {
     #[test]
     fn test_calculate_half_period_ticks() {
         let cpu_freq = 64_000_000;
-        assert_eq!(calculate_half_period_ticks(cpu_freq, 5_000_000), 6);
-        assert_eq!(calculate_half_period_ticks(cpu_freq, 2_000_000), 16);
-        assert_eq!(calculate_half_period_ticks(cpu_freq, 1_000_000), 32);
-        assert_eq!(calculate_half_period_ticks(cpu_freq, 500_000), 64);
-        assert_eq!(calculate_half_period_ticks(cpu_freq, 100_000), 320);
-        assert_eq!(calculate_half_period_ticks(cpu_freq, 50_000), 640);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 5_000_000), 2);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 2_000_000), 5);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 1_000_000), 10);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 500_000), 21);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 100_000), 106);
+        assert_eq!(calculate_half_period_ticks(cpu_freq, 50_000), 213);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 0), 1);
         assert_eq!(calculate_half_period_ticks(cpu_freq, 100_000_000), 1);
         // Test edge cases with odd CPU frequencies
-        assert_eq!(calculate_half_period_ticks(16_000_000, 1_000_000), 8);
+        assert_eq!(calculate_half_period_ticks(16_000_000, 1_000_000), 2);
     }
 
     #[test]
