@@ -140,11 +140,10 @@ mod app {
     async fn blink(cx: blink::Context) {
         let mut step: u32 = 0;
         loop {
-            let status = PROBE_STATUS.load(Ordering::Relaxed);
-            match status {
+            match PROBE_STATUS.load(Ordering::Relaxed) {
                 0 => {
-                    // Disconnected / Idle: short pulse (100ms ON every 1000ms)
-                    if step.is_multiple_of(10) {
+                    // Disconnected / Idle: short heartbeat pulse (100ms ON every 1000ms)
+                    if step % 10 == 0 {
                         cx.local.led.set_high().ok();
                     } else {
                         cx.local.led.set_low().ok();
@@ -164,7 +163,7 @@ mod app {
                 }
                 _ => {
                     cx.local.led.set_low().ok();
-                    Mono::delay(100.millis()).await;
+                    Mono::delay(500.millis()).await;
                 }
             }
         }
@@ -178,7 +177,7 @@ mod app {
         let dap = cx.local.dap;
 
         cx.shared.probe_usb.lock(|probe_usb| {
-            if let Some(request) = probe_usb.interrupt() {
+            while let Some(request) = probe_usb.interrupt() {
                 match request {
                     Request::DAP1Command((report, n)) => {
                         let len = dap.process_command(&report[..n], resp_buf, DapVersion::V1);

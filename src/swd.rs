@@ -274,9 +274,9 @@ impl swj::Dependencies<Swd, Jtag> for Context {
                 } else {
                     self.swdio.set_low();
                 }
-                self.swclk.set_low().ok();
+                self.set_swclk_low();
                 asm::delay(hp);
-                self.swclk.set_high().ok();
+                self.set_swclk_high();
                 asm::delay(hp);
             }
             bits -= frame_bits;
@@ -418,10 +418,14 @@ impl swd::Swd<Context> for Swd {
         self.0.swdio_to_output();
         for b in data {
             let bit_count = core::cmp::min(num_bits, 8);
-            let mut byte_val = *b;
-            for _ in 0..bit_count {
-                self.write_bit(byte_val & 1);
-                byte_val >>= 1;
+            if bit_count == 8 {
+                self.tx8(*b);
+            } else {
+                let mut byte_val = *b;
+                for _ in 0..bit_count {
+                    self.write_bit(byte_val & 1);
+                    byte_val >>= 1;
+                }
             }
             num_bits -= bit_count;
         }
@@ -432,11 +436,15 @@ impl swd::Swd<Context> for Swd {
         self.0.swdio_to_input();
         for b in data.iter_mut() {
             let bit_count = core::cmp::min(num_bits, 8);
-            let mut byte_val = 0u8;
-            for i in 0..bit_count {
-                byte_val |= self.read_bit() << i;
+            if bit_count == 8 {
+                *b = self.rx8();
+            } else {
+                let mut byte_val = 0u8;
+                for i in 0..bit_count {
+                    byte_val |= self.read_bit() << i;
+                }
+                *b = byte_val;
             }
-            *b = byte_val;
             num_bits -= bit_count;
         }
         Ok(())
@@ -456,6 +464,16 @@ impl Swd {
             self.write_bit(data & 1);
             data >>= 1;
         }
+    }
+
+    #[inline(always)]
+    fn rx8(&mut self) -> u8 {
+        self.0.swdio_to_input();
+        let mut data = 0;
+        for i in 0..8 {
+            data |= (self.read_bit() & 1) << i;
+        }
+        data
     }
 
     #[inline(always)]
