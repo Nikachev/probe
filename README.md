@@ -135,9 +135,8 @@ The repository includes host unit tests for firmware logic and a 43-test Pytest 
 
 ### Test Performance Metrics:
 - **Full HIL Suite Execution Time:** **15.05 s** (43 test cases, optimized performance)
-- **Single Test Isolation:** **0.12 s**
-- **Flash Download Throughput:** **165.98 KB/s**
-- **RAM Transfer Bandwidth:** **10.36 KB/s**
+- **Flash Download Throughput:** **271.20 KB/s**
+- **RAM Transfer Bandwidth:** **10.88 KB/s**
 - **Test Pass Rate:** **43/43 (100% Passed)**
 
 For complete wiring diagrams, pinout instructions, and detailed test suite documentation, see the [HIL Testing Guide](docs/HIL_TESTING.md).

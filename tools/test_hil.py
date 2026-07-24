@@ -140,16 +140,16 @@ class TestSuite3MemoryOperations:
     def test_ts303_bulk_memory_transfer(self, probe_client, hil_config, record_property):
         """TS-303: Bulk Memory Transfer & CRC (1024 Bytes)."""
         addr = hil_config.ram_test_addr
-        pattern_words = ["0x{:08X}".format(i * 0x01020304 & 0xFFFFFFFF) for i in range(16)]
+        pattern_words = ["0x{:08X}".format(i * 0x01020304 & 0xFFFFFFFF) for i in range(256)]
         t0 = time.time()
         probe_client.write_and_verify("b32", addr, pattern_words)
-        code, vals, err, duration = probe_client.read_words_vals(addr, 16)
+        code, vals, err, duration = probe_client.read_words_vals(addr, 256)
         elapsed = time.time() - t0
         assert code == 0, f"Bulk read failed: {err}"
-        assert len(vals) == 16, f"Expected 16 words from bulk read, got {len(vals)}"
+        assert len(vals) == 256, f"Expected 256 words from bulk read, got {len(vals)}"
         
-        # Telemetry: Record RAM transfer bandwidth (64 bytes transferred)
-        kb_transferred = (16 * 4) / 1024.0
+        # Telemetry: Record RAM transfer bandwidth (1024 bytes transferred)
+        kb_transferred = (256 * 4) / 1024.0
         kbps = kb_transferred / elapsed if elapsed > 0 else 0
         record_property("ram_throughput_kbps", f"{kbps:.2f}")
 

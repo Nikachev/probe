@@ -116,7 +116,7 @@ The HIL test suite is built natively on top of `pytest` and `ProbeRsClient`.
 | | **TS-204** | Line Reset Sequence | Generate 50+ SWD Line Reset pulses & JTAG-to-SWD (`0xE79E`) |
 | **Suite 3: Memory Operations** | **TS-301** | Single Word RAM R/W | 32-bit word read/write at `0x20004000` |
 | | **TS-302** | Sub-word RAM Access | Byte (`0xA5`) and half-word (`0x1234`) masking tests |
-| | **TS-303** | Bulk Memory Transfer | Transfer 1024 bytes of RAM with bandwidth measurement (**10.36 KB/s**) |
+| | **TS-303** | Bulk Memory Transfer | Transfer 1024 bytes of RAM with bandwidth measurement (**10.88 KB/s**) |
 | | **TS-304** | Flash Read Boundary | Read bootloader vector table at `0x00000000` |
 | **Suite 4: Execution Control** | **TS-401** | CPU Halt & Status | Halt target core (`C_HALT = 1`) |
 | | **TS-402** | Register Read/Write | Read and write CPU register states |
@@ -125,7 +125,7 @@ The HIL test suite is built natively on top of `pytest` and `ProbeRsClient`.
 | | **TS-405** | Watchpoints via DWT | Test DWT watchpoint trigger logic |
 | | **TS-406** | CPU Resume | Resume core execution (`C_HALT = 0`) |
 | **Suite 5: Flash Programming** | **TS-501** | Sector Erase | Erase 4096-byte page and verify blank `0xFFFFFFFF` |
-| | **TS-502** | Full Binary Flashing | Flash `target_blinky.elf` with bandwidth measurement (**165.98 KB/s**) |
+| | **TS-502** | Full Binary Flashing | Flash `target_blinky.elf` with bandwidth measurement (**271.20 KB/s**) |
 | | **TS-503** | Flash Verification | Byte-for-byte memory verification via `--verify` |
 | | **TS-504** | Mass Erase Protection | Verify application and bootloader sector protection |
 | **Suite 6: Reset Control** | **TS-601** | Hardware nRESET | Assert physical reset pulse on line `P0.22` |
@@ -163,8 +163,7 @@ You can also run manual debug operations directly using `probe-rs`:
 ## 7. Performance Metrics
 
 - **Full HIL Suite Execution Time:** **15.05 s** (43 test cases)
-- **Single Test Isolation Execution:** **0.12 s**
-- **Flash Download Speed:** **165.98 KB/s**
-- **RAM Transfer Speed:** **10.36 KB/s**
+- **Flash Download Speed:** **271.20 KB/s**
+- **RAM Transfer Speed:** **10.88 KB/s**
 - **Pass Rate:** **43/43 (100% Passed)**
 
