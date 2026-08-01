@@ -214,13 +214,7 @@ class ProbeRsClient:
         return False
 
     def info(self, speed=None):
-        cmd = ["info", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
-        if speed:
-            cmd.extend(["--speed", str(speed)])
-        return self.run_raw(cmd)
-
-    def info(self, speed=None):
-        cmd = ["info", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
+        cmd = ["info", "--verbose", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
         if speed:
             cmd.extend(["--speed", str(speed)])
         return self.run_raw(cmd)
@@ -355,7 +349,7 @@ class ProbeRsClient:
         cmd = [self.probe_rs_cli, "run", "--chip", self.config.target_chip, "--probe", self.config.probe_identifier]
         if speed:
             cmd.extend(["--speed", str(speed)])
-        cmd.extend([elf_path, "--rtt-scan-memory"])
+        cmd.extend([elf_path, "--scan-region", "ram"])
         start = time.time()
         p = None
         stdout_chunks, stderr_chunks = [], []

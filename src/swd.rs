@@ -460,8 +460,17 @@ impl Swd {
     #[inline(always)]
     fn tx8(&mut self, mut data: u8) {
         self.0.swdio_to_output();
+        let hp = self.0.half_period_ticks;
         for _ in 0..8 {
-            self.write_bit(data & 1);
+            if (data & 1) != 0 {
+                self.0.swdio.set_high();
+            } else {
+                self.0.swdio.set_low();
+            }
+            self.0.set_swclk_low();
+            asm::delay(hp);
+            self.0.set_swclk_high();
+            asm::delay(hp);
             data >>= 1;
         }
     }
@@ -469,9 +478,15 @@ impl Swd {
     #[inline(always)]
     fn rx8(&mut self) -> u8 {
         self.0.swdio_to_input();
-        let mut data = 0;
+        let hp = self.0.half_period_ticks;
+        let mut data = 0u8;
         for i in 0..8 {
-            data |= (self.read_bit() & 1) << i;
+            self.0.set_swclk_low();
+            asm::delay(hp);
+            let bit = self.0.swdio.is_high() as u8;
+            self.0.set_swclk_high();
+            asm::delay(hp);
+            data |= bit << i;
         }
         data
     }
@@ -479,9 +494,15 @@ impl Swd {
     #[inline(always)]
     fn rx4(&mut self) -> u8 {
         self.0.swdio_to_input();
-        let mut data = 0;
+        let hp = self.0.half_period_ticks;
+        let mut data = 0u8;
         for i in 0..4 {
-            data |= (self.read_bit() & 1) << i;
+            self.0.set_swclk_low();
+            asm::delay(hp);
+            let bit = self.0.swdio.is_high() as u8;
+            self.0.set_swclk_high();
+            asm::delay(hp);
+            data |= bit << i;
         }
         data
     }
@@ -489,9 +510,15 @@ impl Swd {
     #[inline(always)]
     fn rx5(&mut self) -> u8 {
         self.0.swdio_to_input();
-        let mut data = 0;
+        let hp = self.0.half_period_ticks;
+        let mut data = 0u8;
         for i in 0..5 {
-            data |= (self.read_bit() & 1) << i;
+            self.0.set_swclk_low();
+            asm::delay(hp);
+            let bit = self.0.swdio.is_high() as u8;
+            self.0.set_swclk_high();
+            asm::delay(hp);
+            data |= bit << i;
         }
         data
     }
@@ -499,21 +526,48 @@ impl Swd {
     #[inline(always)]
     fn send_data(&mut self, mut data: u32, parity: bool) {
         self.0.swdio_to_output();
+        let hp = self.0.half_period_ticks;
         for _ in 0..32 {
-            self.write_bit((data & 1) as u8);
+            if (data & 1) != 0 {
+                self.0.swdio.set_high();
+            } else {
+                self.0.swdio.set_low();
+            }
+            self.0.set_swclk_low();
+            asm::delay(hp);
+            self.0.set_swclk_high();
+            asm::delay(hp);
             data >>= 1;
         }
-        self.write_bit(parity as u8);
+        if parity {
+            self.0.swdio.set_high();
+        } else {
+            self.0.swdio.set_low();
+        }
+        self.0.set_swclk_low();
+        asm::delay(hp);
+        self.0.set_swclk_high();
+        asm::delay(hp);
     }
 
     #[inline(always)]
     fn read_data(&mut self) -> (u32, bool) {
         self.0.swdio_to_input();
+        let hp = self.0.half_period_ticks;
         let mut data = 0u32;
         for i in 0..32 {
-            data |= (self.read_bit() as u32) << i;
+            self.0.set_swclk_low();
+            asm::delay(hp);
+            let bit = self.0.swdio.is_high() as u32;
+            self.0.set_swclk_high();
+            asm::delay(hp);
+            data |= bit << i;
         }
-        let parity = self.read_bit() != 0;
+        self.0.set_swclk_low();
+        asm::delay(hp);
+        let parity = self.0.swdio.is_high();
+        self.0.set_swclk_high();
+        asm::delay(hp);
         (data, parity)
     }
 
