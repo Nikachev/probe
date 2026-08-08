@@ -75,7 +75,7 @@ impl ProbeUsb {
             let new_state = self.device.state();
             self.device_state = new_state;
 
-            if (old_state != new_state) && (new_state != UsbDeviceState::Configured) {
+            if old_state == UsbDeviceState::Configured && new_state != UsbDeviceState::Configured {
                 return Some(Request::Suspend);
             }
 

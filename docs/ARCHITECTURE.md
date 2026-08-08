@@ -53,7 +53,7 @@ The firmware binary is compiled with maximum optimization under `[profile.releas
 All hardware pins, system clock frequencies, magic reset values, and USB descriptors are consolidated in `src/config.rs`:
 - **Hardware Pins:** `DEFAULT_SWDIO_PIN` (20), `DEFAULT_SWCLK_PIN` (17), `DEFAULT_NRESET_PIN` (22)
 - **Frequencies:** `DEFAULT_CPU_FREQUENCY` (64 MHz), `DEFAULT_MAX_SWD_FREQUENCY` (5 MHz)
-- **Reset Magic Values:** `GPREGRET_BOOTLOADER_CHECK` (`0xAB`), `DFU_MAGIC_UF2_RESET` (`0x57`), `APP_VTOR_OFFSET` (`0x0002_6000`)
+- **Reset Magic Values:** `GPREGRET_BOOTLOADER_CHECK` (`0xAB`), `DFU_MAGIC_UF2_RESET` (`0x57`), `APP_VTOR_OFFSET` (`0x0000_1000`)
 - **USB Constants:** `USB_VID` (`0x1209`), `USB_PID` (`0x4853`), `USB_MANUFACTURER`, `USB_PRODUCT`
 
 ---
@@ -61,18 +61,17 @@ All hardware pins, system clock frequencies, magic reset values, and USB descrip
 ## 🗺️ Memory Map & Bootloader Integration
 
 ### Memory Layout
-The nice!nano v2 comes pre-flashed with the Adafruit UF2 Bootloader and Nordic SoftDevice S140 v6.1.1. The firmware memory map is configured in `memory.x` as follows:
+The nice!nano v2 runs under the Adafruit UF2 Bootloader without SoftDevice. The firmware memory map is configured in `memory.x` as follows:
 
 | Address Range | Size | Component / Purpose |
 |---|---|---|
 | `0x0000_0000 .. 0x0000_1000` | 4 KB | MBR (Master Boot Record) |
-| `0x0000_1000 .. 0x0002_6000` | 148 KB | SoftDevice S140 6.1.1 (reserved) |
-| **`0x0002_6000 .. 0x000F_4000`** | **824 KB** | **Application Flash (`FLASH`)** |
+| **`0x0000_1000 .. 0x000F_4000`** | **972 KB** | **Application Flash (`FLASH`)** |
 | `0x000F_4000 .. 0x0010_0000` | 4 KB | Adafruit UF2 Bootloader + Settings |
 | `0x2000_0000 .. 0x2004_0000` | 256 KB | System RAM (`RAM`) |
 
 ### Vector Table Relocation & Self-Reset
-1. **VTOR Relocation:** Since the application is linked at base `0x0002_6000`, the Cortex-M Vector Table Offset Register (`SCB.vtor`) is rewritten at application entry using `APP_VTOR_OFFSET`.
+1. **VTOR Relocation:** Since the application is linked at base `0x0000_1000` (right after the MBR), the Cortex-M Vector Table Offset Register (`SCB.vtor`) is rewritten at application entry using `APP_VTOR_OFFSET`.
 2. **One-Time Self-Reset Handoff:** The Adafruit UF2 bootloader jumps into the application without resetting peripherals, leaving the internal nRF52840 USB 3.3V power regulator uninitialized (`POWER.USBREGSTATUS.OUTPUTRDY = 0`). `init()` performs a one-time software reset guarded by `GPREGRET_BOOTLOADER_CHECK` (`0xAB`).
 
 ---

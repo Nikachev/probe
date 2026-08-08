@@ -192,7 +192,7 @@ class TestSuite4ExecutionControl:
         assert any(k in combined for k in ("FPB", "Flash Patch", "breakpoints", "Cortex-M4")), f"FPB breakpoint capabilities missing in: {combined}"
         # Direct hardware register check using CoreSightAddr.FPB_CTRL
         fp_code, fp_val, _, _ = probe_client.read_u32_val(CoreSightAddr.FPB_CTRL)
-        assert fp_code == 0 or fp_val is not None, "FPB hardware control register read failed"
+        assert fp_code == 0 and fp_val is not None, "FPB hardware control register read failed"
 
     def test_ts405_watchpoints_dwt(self, probe_client, hil_config, cached_probe_info, target_reset_run):
         """TS-405: Watchpoints via DWT Component (DWT_CTRL)."""
@@ -202,7 +202,7 @@ class TestSuite4ExecutionControl:
         assert any(k in combined for k in ("DWT", "Data Watchpoint", "watchpoints", "Cortex-M4")), f"DWT watchpoint capabilities missing in: {combined}"
         # Direct hardware register check using CoreSightAddr.DWT_CTRL
         dwt_code, dwt_val, _, _ = probe_client.read_u32_val(CoreSightAddr.DWT_CTRL)
-        assert dwt_code == 0 or dwt_val is not None, "DWT hardware control register read failed"
+        assert dwt_code == 0 and dwt_val is not None, "DWT hardware control register read failed"
 
     def test_ts406_cpu_resume(self, probe_client, hil_config, target_reset_run):
         """TS-406: CPU Resume & Running State Transition."""

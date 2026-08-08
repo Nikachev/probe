@@ -19,16 +19,20 @@ use panic_probe as _;
 
 use rusty_probe_nicenano::config::{APP_VTOR_OFFSET, DEFAULT_CPU_FREQUENCY};
 
+/// Initial SP + Reset_Handler for SWD-flashed targets (Board B has no MBR at 0x0).
 #[cfg(target_arch = "arm")]
 #[link_section = ".boot_vectors"]
 #[no_mangle]
-pub static BOOT_VECTORS: [u32; 2] = [0x2004_0000, 0x0002_6005];
+pub static BOOT_VECTORS: [u32; 2] = [0x2004_0000, 0x0000_1005];
+
+use core::sync::atomic::{AtomicU32, Ordering};
+
+/// Fault trigger mode: 0 = Normal loop, 1 = BKPT, 2 = Invalid Address Read, 3 = Division by zero
+#[no_mangle]
+pub static FAULT_TRIGGER_MODE: AtomicU32 = AtomicU32::new(0);
 
 #[no_mangle]
-pub static mut FAULT_TRIGGER_MODE: u32 = 0; // 0 = Normal loop, 1 = BKPT, 2 = Invalid Address Read, 3 = Division by zero
-
-#[no_mangle]
-pub static mut FAULT_STATUS: u32 = 0xAA55AA55;
+pub static FAULT_STATUS: AtomicU32 = AtomicU32::new(0xAA55AA55);
 
 fn delay_ms(ms: u32) {
     cortex_m::asm::delay((DEFAULT_CPU_FREQUENCY / 1000) * ms);
@@ -44,7 +48,7 @@ fn main() -> ! {
     let _dp = hal::pac::Peripherals::take().unwrap();
 
     loop {
-        let mode = unsafe { FAULT_TRIGGER_MODE };
+        let mode = FAULT_TRIGGER_MODE.load(Ordering::Relaxed);
         match mode {
             1 => {
                 // Trigger breakpoint
@@ -54,7 +58,13 @@ fn main() -> ! {
                 // Invalid memory read (bad pointer dereference)
                 let ptr = 0xFF00_0000 as *const u32;
                 let val = unsafe { core::ptr::read_volatile(ptr) };
-                unsafe { FAULT_STATUS = val };
+                FAULT_STATUS.store(val, Ordering::Relaxed);
+            }
+            3 => {
+                // Trigger a division by zero (UsageFault if DIV_0_TRP is set in CCR)
+                let zero: u32 = unsafe { core::ptr::read_volatile(&0u32) };
+                let result = 1u32.wrapping_div(zero);
+                FAULT_STATUS.store(result, Ordering::Relaxed);
             }
             _ => {
                 // Normal idle heartbeat

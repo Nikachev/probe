@@ -48,8 +48,7 @@ mod app {
         usb_alloc: MaybeUninit<UsbBusAllocator<UsbBus>> = MaybeUninit::uninit(),
     ])]
     fn init(cx: init::Context) -> (Shared, Local) {
-        // The stock nice!nano ships with the S140 SoftDevice occupying
-        // 0x1000..0x26000, so our application is linked at 0x26000. Point the
+        // The application is linked at 0x1000 (right after the MBR). Point the
         // vector table there so exceptions/interrupts use our table directly.
         //
         // One-time self-reset: the Adafruit UF2 bootloader jumps into the
@@ -77,11 +76,11 @@ mod app {
         defmt::info!("HFXO enabled");
 
         // NOTE: We intentionally do NOT gate on POWER.USBREGSTATUS.OUTPUTRDY here.
-        // On this board (with the S140 SoftDevice present) that bit stays 0 even
-        // though VBUS is detected, which would hang bring-up. The USB PHY supply
-        // is enabled automatically by hardware when VBUS is present (the stock
-        // bootloader enumerates fine), and `nrf-usbd`'s enable() waits on the
-        // digital `EVENTCAUSE.READY` instead. This matches the nrf-hal examples.
+        // On this board that bit can stay 0 even though VBUS is detected, which
+        // would hang bring-up. The USB PHY supply is enabled automatically by
+        // hardware when VBUS is present (the stock bootloader enumerates fine),
+        // and `nrf-usbd`'s enable() waits on the digital `EVENTCAUSE.READY`
+        // instead. This matches the nrf-hal examples.
 
         // Onboard LED on P0.15 (labelled "Blue" in Adafruit board.h, red on this board).
         let port0 = p0::Parts::new(dp.P0);
@@ -148,7 +147,7 @@ mod app {
                     } else {
                         cx.local.led.set_low().ok();
                     }
-                    step = step.wrapping_add(1);
+                    step = (step + 1) % 10;
                     Mono::delay(100.millis()).await;
                 }
                 1 => {

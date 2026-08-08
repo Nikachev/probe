@@ -15,7 +15,7 @@ BIN="${1:-app}"
 OUTDIR="${2:-$ROOT_DIR/tmp}"
 TARGET="thumbv7em-none-eabihf"
 FAMILY="0xADA52840"      # nRF52840 UF2 family id
-BASE="0x26000"          # application start (after MBR + S140 6.1.1 SoftDevice)
+BASE="0x1000"           # application start (after MBR, no SoftDevice)
 
 mkdir -p "$OUTDIR"
 

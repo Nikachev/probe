@@ -15,8 +15,8 @@ pub const USB_MANUFACTURER: &str = "Probe-rs development team";
 /// Reported USB Product string.
 pub const USB_PRODUCT: &str = "Rusty Probe (nice!nano) with CMSIS-DAP v1/v2 Support";
 
-/// Vector Table Offset Register (VTOR) offset when linked above SoftDevice S140.
-pub const APP_VTOR_OFFSET: u32 = 0x0002_6000;
+/// Vector Table Offset Register (VTOR) offset — application linked right after MBR.
+pub const APP_VTOR_OFFSET: u32 = 0x0000_1000;
 
 /// Magic byte written to GPREGRET to indicate one-time DFU reset boot state.
 pub const GPREGRET_BOOTLOADER_CHECK: u32 = 0xAB;
@@ -38,8 +38,9 @@ pub const DEFAULT_NRESET_PIN: u8 = 22;
 /// Duration of hardware nRESET pulse in milliseconds (10 ms).
 pub const NRESET_PULSE_MS: u32 = 10;
 
-/// Number of CPU delay ticks for 10 ms nRESET pulse at 64 MHz core frequency.
-pub const NRESET_PULSE_TICKS: u32 = DEFAULT_CPU_FREQUENCY / 1000 * NRESET_PULSE_MS;
+/// Number of CPU cycles for 10 ms nRESET pulse at 64 MHz core frequency.
+/// Use with `asm::delay(NRESET_PULSE_CYCLES / 3)` since asm::delay runs a 3-cycle loop.
+pub const NRESET_PULSE_CYCLES: u32 = DEFAULT_CPU_FREQUENCY / 1000 * NRESET_PULSE_MS;
 
 #[cfg(test)]
 mod tests {
@@ -47,7 +48,7 @@ mod tests {
 
     #[test]
     fn test_nreset_pulse_ticks() {
-        assert_eq!(NRESET_PULSE_TICKS, 640_000);
+        assert_eq!(NRESET_PULSE_CYCLES, 640_000);
         assert_eq!(NRESET_PULSE_MS, 10);
     }
 
@@ -55,6 +56,6 @@ mod tests {
     fn test_config_constants() {
         assert_eq!(USB_VID, 0x1209);
         assert_eq!(USB_PID, 0x4853);
-        assert_eq!(APP_VTOR_OFFSET, 0x0002_6000);
+        assert_eq!(APP_VTOR_OFFSET, 0x0000_1000);
     }
 }

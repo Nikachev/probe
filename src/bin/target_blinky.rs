@@ -4,7 +4,7 @@
 // Target Blinky Firmware for HIL testing.
 //
 // Features:
-// - VTOR relocation to 0x26000 (nice!nano SoftDevice offset).
+// - VTOR relocation (after MBR, no SoftDevice).
 // - Well-known static symbols in SRAM for read/write verification.
 // - LED blinking on P0.15 for visual indication of target execution.
 // - Counter variable in SRAM incremented each loop.
@@ -21,19 +21,22 @@ use panic_probe as _;
 
 use rusty_probe_nicenano::config::{APP_VTOR_OFFSET, DEFAULT_CPU_FREQUENCY};
 
+/// Initial SP + Reset_Handler for SWD-flashed targets (Board B has no MBR at 0x0).
 #[cfg(target_arch = "arm")]
 #[link_section = ".boot_vectors"]
 #[no_mangle]
-pub static BOOT_VECTORS: [u32; 2] = [0x2004_0000, 0x0002_6005];
+pub static BOOT_VECTORS: [u32; 2] = [0x2004_0000, 0x0000_1005];
+
+use core::sync::atomic::{AtomicU32, Ordering};
 
 #[no_mangle]
-pub static mut SRAM_MAGIC_1: u32 = 0xDEADBEEF;
+pub static SRAM_MAGIC_1: AtomicU32 = AtomicU32::new(0xDEADBEEF);
 
 #[no_mangle]
-pub static mut SRAM_MAGIC_2: u32 = 0xCAFEBABE;
+pub static SRAM_MAGIC_2: AtomicU32 = AtomicU32::new(0xCAFEBABE);
 
 #[no_mangle]
-pub static mut TEST_COUNTER: u32 = 0;
+pub static TEST_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[no_mangle]
 pub static mut SRAM_TEST_BUFFER: [u8; 256] = [0xAA; 256];
@@ -44,7 +47,7 @@ fn delay_ms(ms: u32) {
 
 #[entry]
 fn main() -> ! {
-    // Application is linked at 0x26000 (after Adafruit UF2 Bootloader + SoftDevice S140).
+    // VTOR relocation: application is linked at 0x1000 (after MBR).
     unsafe {
         let cp = cortex_m::Peripherals::steal();
         cp.SCB.vtor.write(APP_VTOR_OFFSET);
@@ -60,8 +63,6 @@ fn main() -> ! {
         led.set_low().ok();
         delay_ms(200);
 
-        unsafe {
-            TEST_COUNTER = TEST_COUNTER.wrapping_add(1);
-        }
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     }
 }

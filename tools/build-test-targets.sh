@@ -7,7 +7,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTDIR="$ROOT_DIR/tmp/test-targets"
 TARGET="thumbv7em-none-eabihf"
 FAMILY="0xADA52840"      # nRF52840 UF2 family id
-BASE="0x26000"          # application start (after MBR + SoftDevice)
+BASE="0x1000"           # application start (after MBR, no SoftDevice)
 
 mkdir -p "$OUTDIR"
 

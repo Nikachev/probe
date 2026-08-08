@@ -90,27 +90,10 @@ mod app {
         (Shared { usb_dev, serial }, Local { led })
     }
 
-    // Busy-poll the USB stack continuously (do NOT rely on the USBD interrupt
-    // re-firing). This is a diagnostic to determine whether the connect/disconnect
-    // loop is caused by the interrupt not being serviced.
-    #[idle(shared = [usb_dev, serial])]
-    fn idle(mut cx: idle::Context) -> ! {
-        let mut buf = [0u8; 64];
+    #[idle]
+    fn idle(_cx: idle::Context) -> ! {
         loop {
-            cx.shared.usb_dev.lock(|d| {
-                cx.shared.serial.lock(|s| {
-                    if d.poll(&mut [s]) {
-                        loop {
-                            match s.read(&mut buf) {
-                                Ok(count) if count > 0 => {
-                                    let _ = s.write(&buf[..count]);
-                                }
-                                _ => break,
-                            }
-                        }
-                    }
-                })
-            });
+            cortex_m::asm::wfi();
         }
     }
 

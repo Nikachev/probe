@@ -59,10 +59,10 @@ pub struct SwdPins {
 impl Default for SwdPinConfig {
     fn default() -> Self {
         Self {
-            swdio_pin: 20,
-            swclk_pin: 17,
-            nreset_pin: 22,
-            cpu_frequency: 64_000_000,
+            swdio_pin: crate::config::DEFAULT_SWDIO_PIN,
+            swclk_pin: crate::config::DEFAULT_SWCLK_PIN,
+            nreset_pin: crate::config::DEFAULT_NRESET_PIN,
+            cpu_frequency: crate::config::DEFAULT_CPU_FREQUENCY,
         }
     }
 }
@@ -249,8 +249,8 @@ impl swj::Dependencies<Swd, Jtag> for Context {
         }
 
         // Busy-wait up to wait_us, then sample the pin states.
-        let delay_ticks = wait_us.saturating_mul(self.cpu_frequency / 1_000_000);
-        asm::delay(delay_ticks);
+        let delay_cycles = wait_us.saturating_mul(self.cpu_frequency / 1_000_000);
+        asm::delay((delay_cycles / 3).max(1));
 
         let mut ret = swj::Pins::empty();
         ret.set(swj::Pins::SWCLK, self.swclk.is_set_high().unwrap_or(false));
@@ -476,11 +476,11 @@ impl Swd {
     }
 
     #[inline(always)]
-    fn rx8(&mut self) -> u8 {
+    fn rx_bits(&mut self, count: usize) -> u8 {
         self.0.swdio_to_input();
         let hp = self.0.half_period_ticks;
         let mut data = 0u8;
-        for i in 0..8 {
+        for i in 0..count {
             self.0.set_swclk_low();
             asm::delay(hp);
             let bit = self.0.swdio.is_high() as u8;
@@ -489,38 +489,21 @@ impl Swd {
             data |= bit << i;
         }
         data
+    }
+
+    #[inline(always)]
+    fn rx8(&mut self) -> u8 {
+        self.rx_bits(8)
     }
 
     #[inline(always)]
     fn rx4(&mut self) -> u8 {
-        self.0.swdio_to_input();
-        let hp = self.0.half_period_ticks;
-        let mut data = 0u8;
-        for i in 0..4 {
-            self.0.set_swclk_low();
-            asm::delay(hp);
-            let bit = self.0.swdio.is_high() as u8;
-            self.0.set_swclk_high();
-            asm::delay(hp);
-            data |= bit << i;
-        }
-        data
+        self.rx_bits(4)
     }
 
     #[inline(always)]
     fn rx5(&mut self) -> u8 {
-        self.0.swdio_to_input();
-        let hp = self.0.half_period_ticks;
-        let mut data = 0u8;
-        for i in 0..5 {
-            self.0.set_swclk_low();
-            asm::delay(hp);
-            let bit = self.0.swdio.is_high() as u8;
-            self.0.set_swclk_high();
-            asm::delay(hp);
-            data |= bit << i;
-        }
-        data
+        self.rx_bits(5)
     }
 
     #[inline(always)]
@@ -733,7 +716,7 @@ pub fn pulse_target_nreset() {
     {
         let pin_mask = 1 << SwdPinConfig::default().nreset_pin;
         p0_reg().outclr.write(|w| unsafe { w.bits(pin_mask) });
-        cortex_m::asm::delay(crate::config::NRESET_PULSE_TICKS / 3);
+        cortex_m::asm::delay(crate::config::NRESET_PULSE_CYCLES / 3);
         p0_reg().outset.write(|w| unsafe { w.bits(pin_mask) });
     }
 }

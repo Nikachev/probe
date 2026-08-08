@@ -48,14 +48,14 @@ def convert_from_uf2(buf):
         block = buf[ptr:ptr + 512]
         hd = struct.unpack(b"<IIIIIIII", block[0:32])
         if hd[0] != UF2_MAGIC_START0 or hd[1] != UF2_MAGIC_START1:
-            print("Skipping block at " + ptr + "; bad magic")
+            print(f"Skipping block at {ptr}; bad magic")
             continue
         if hd[2] & 1:
             # NO-flash flag set; skip block
             continue
         datalen = hd[4]
         if datalen > 476:
-            assert False, "Invalid UF2 data size at " + ptr
+            assert False, f"Invalid UF2 data size at {ptr}"
         newaddr = hd[3]
         if (hd[2] & 0x2000) and (currfamilyid == None):
             currfamilyid = hd[7]
@@ -66,11 +66,11 @@ def convert_from_uf2(buf):
                 appstartaddr = newaddr
         padding = newaddr - curraddr
         if padding < 0:
-            assert False, "Block out of order at " + ptr
+            assert False, f"Block out of order at {ptr}"
         if padding > 10*1024*1024:
-            assert False, "More than 10M of padding needed at " + ptr
+            assert False, f"More than 10M of padding needed at {ptr}"
         if padding % 4 != 0:
-            assert False, "Non-word padding size at " + ptr
+            assert False, f"Non-word padding size at {ptr}"
         while padding > 0:
             padding -= 4
             outp.append(b"\x00\x00\x00\x00")
@@ -215,10 +215,10 @@ def get_drives():
         if sys.platform == "darwin":
             searchpaths = ["/Volumes"]
         elif sys.platform == "linux":
-            searchpaths += ["/media/" + os.environ["USER"], "/run/media/" + os.environ["USER"]]
+            searchpaths += ["/media/" + os.environ.get("USER", ""), "/run/media/" + os.environ.get("USER", "")]
             if "SUDO_USER" in os.environ.keys():
-                searchpaths += ["/media/" + os.environ["SUDO_USER"]]
-                searchpaths += ["/run/media/" + os.environ["SUDO_USER"]]
+                searchpaths += ["/media/" + os.environ.get("SUDO_USER", "")]
+                searchpaths += ["/run/media/" + os.environ.get("SUDO_USER", "")]
 
         for rootpath in searchpaths:
             if os.path.isdir(rootpath):

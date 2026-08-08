@@ -28,7 +28,7 @@ Turns the board into a high-speed SWD debug probe for flashing, debugging, and R
 
 | Document | Description |
 |---|---|
-| 📐 **[Architecture Overview](docs/ARCHITECTURE.md)** | Technical specification of the firmware, RTIC 2 tasks, memory map (`0x26000`), SWD driver (`swd.rs`), PAC register IO, and USB stack design. |
+| 📐 **[Architecture Overview](docs/ARCHITECTURE.md)** | Technical specification of the firmware, RTIC 2 tasks, memory map (`0x1000`), SWD driver (`swd.rs`), PAC register IO, and USB stack design. |
 | 🧪 **[HIL Testing Guide](docs/HIL_TESTING.md)** | Comprehensive guide for automated 43-test hardware test suite using two nice!nano v2 boards. |
 | 🛠️ **[Hardware Diagnostics](docs/DIAGNOSTICS.md)** | Standalone bring-up (`diag`) and USB serial echo (`diag_usb`) diagnostic firmware guides. |
 
@@ -76,7 +76,7 @@ Turns the board into a high-speed SWD debug probe for flashing, debugging, and R
 # Build USB CDC serial diagnostic binary (tmp/diag_usb.uf2):
 ./tools/make-uf2.sh diag_usb
 ```
-The main application output binary is saved at `tmp/app.uf2` (base address `0x26000`, family ID `0xADA52840`). For details on diagnostic binaries, see the [Hardware Diagnostics Guide](docs/DIAGNOSTICS.md).
+The main application output binary is saved at `tmp/app.uf2` (base address `0x1000`, family ID `0xADA52840`). For details on diagnostic binaries, see the [Hardware Diagnostics Guide](docs/DIAGNOSTICS.md).
 
 ### Flashing nice!nano v2
 1. Connect nice!nano v2 to USB.
@@ -147,10 +147,9 @@ For complete wiring diagrams, pinout instructions, and detailed test suite docum
 
 ## 🗺️ Memory Layout
 
-Ships with Adafruit UF2 Bootloader and **SoftDevice S140 6.1.1** (`0x1000..0x26000`):
+Runs under the Adafruit UF2 Bootloader (no SoftDevice):
 - `0x00000..0x01000`: MBR
-- `0x01000..0x26000`: SoftDevice S140 6.1.1
-- `0x26000..0xF4000`: CMSIS-DAP Application (`FLASH`, ~824 KB)
+- `0x01000..0xF4000`: CMSIS-DAP Application (`FLASH`, ~972 KB)
 - `0xF4000..0x100000`: Adafruit Bootloader + Settings
 
 ---

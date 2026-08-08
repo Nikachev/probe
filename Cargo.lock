@@ -550,7 +550,6 @@ dependencies = [
  "nrf52840-hal",
  "panic-probe",
  "rtic",
- "rtic-common",
  "rtic-monotonics",
  "static_cell",
  "usbd-serial",

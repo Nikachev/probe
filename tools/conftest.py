@@ -56,6 +56,14 @@ def pytest_runtest_setup(item):
             pytest.skip("Skipping HIL test: 'probe-rs' CLI tool not found in PATH")
 
 
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Attach test report to item for use in fixtures (e.g. ensure_target_recovered)."""
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, f"rep_{rep.when}", rep)
+
+
 @pytest.fixture(scope="session")
 def hil_config(request):
     probe_id = request.config.getoption("--probe")

@@ -11,15 +11,18 @@ fn main() {}
 // LED sequence (each "blink" = 150ms on / 150ms off):
 //   1 blink,  pause  -> reached after LED init (start)
 //   2 blinks, pause  -> HFXO (external 32 MHz crystal) started OK
-//   then a REPEATING status pattern based on the USB regulator:
-//     * 4 FAST blinks, repeating          -> OUTPUTRDY ready (USB power OK)
-//     * slow 1s-on / 1s-off heartbeat     -> OUTPUTRDY NOT ready (VBUS/regulator issue)
+//   then a REPEATING status pattern based on the USB power domain:
+//     * 2 blinks, pause  -> VBUSDETECT=1, OUTPUTRDY=1  (all good)
+//     * 3 blinks, pause  -> VBUSDETECT=1, OUTPUTRDY=0  (VBUS seen, regulator not ready)
+//     * 4 blinks, pause  -> VBUSDETECT=0, OUTPUTRDY=1  (unexpected)
+//     * 5 blinks, pause  -> VBUSDETECT=0, OUTPUTRDY=0  (no VBUS seen at all)
 //
 // Interpretation:
 //   no blinks at all            -> hang before/at LED init (unexpected)
 //   1 blink then dark           -> hang while starting HFXO
-//   2 blinks then fast pattern  -> HFXO + USB regulator OK (problem is USB stack)
-//   2 blinks then slow heartbeat-> HFXO OK but USB regulator not ready
+//   2 blinks then 2-blink loop  -> HFXO + USB regulator OK (problem is USB stack)
+//   2 blinks then 3-blink loop  -> HFXO OK but USB regulator not ready
+//   2 blinks then 5-blink loop  -> HFXO OK but no VBUS detected
 
 use cortex_m_rt::entry;
 use defmt_rtt as _;
@@ -28,8 +31,9 @@ use nrf52840_hal as hal;
 use panic_probe as _;
 
 use hal::gpio::{p0::P0_15, Output, PushPull};
+use rusty_probe_nicenano::config::DEFAULT_CPU_FREQUENCY;
 
-const CYCLES_PER_MS: u32 = 64_000; // CPU runs at 64 MHz
+const CYCLES_PER_MS: u32 = DEFAULT_CPU_FREQUENCY / 1000;
 
 fn delay_ms(ms: u32) {
     cortex_m::asm::delay(CYCLES_PER_MS * ms);
@@ -48,10 +52,10 @@ fn blink(led: &mut Led, n: u32) {
 
 #[entry]
 fn main() -> ! {
-    // Application is linked at 0x26000 (after the S140 SoftDevice).
+    // Application is linked at 0x1000 (after the MBR, no SoftDevice).
     unsafe {
         let cp = cortex_m::Peripherals::steal();
-        cp.SCB.vtor.write(0x0002_6000);
+        cp.SCB.vtor.write(rusty_probe_nicenano::config::APP_VTOR_OFFSET);
     }
 
     let dp = hal::pac::Peripherals::take().unwrap();

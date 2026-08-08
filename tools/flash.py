@@ -50,12 +50,10 @@ def flash_firmware(auto_reset=True, mount=None, uf2_path=DEFAULT_UF2_PATH, timeo
             time.sleep(1)
 
     if not mount_point:
-        print("❌ Error: Could not find NICENANO drive.")
-        sys.exit(1)
+        raise RuntimeError("Could not find NICENANO drive")
 
     if not os.path.exists(uf2_path):
-        print(f"❌ Error: Firmware file '{uf2_path}' not found! Run 'make build' first.")
-        sys.exit(1)
+        raise RuntimeError(f"Firmware file '{uf2_path}' not found")
 
     print(f"✅ Found {mount_point}! Flashing {uf2_path}...")
     try:
@@ -91,8 +89,7 @@ def flash_firmware(auto_reset=True, mount=None, uf2_path=DEFAULT_UF2_PATH, timeo
                 time.sleep(0.5)
 
         if not written:
-            print("❌ Error: Failed to write app.uf2 to NICENANO drive.")
-            sys.exit(1)
+            raise RuntimeError("Failed to write app.uf2 to NICENANO drive")
 
         # Verify whether Board A unmounted NICENANO volume and rebooted into application
         print("Checking for Board A application reboot...")
@@ -121,8 +118,7 @@ def flash_firmware(auto_reset=True, mount=None, uf2_path=DEFAULT_UF2_PATH, timeo
             res = subprocess.run(cmd)
             sys.exit(res.returncode)
     except Exception as e:
-        print(f"❌ Flashing failed: {e}")
-        sys.exit(1)
+        raise RuntimeError(f"Flashing failed: {e}") from e
 
 
 def main():
@@ -134,14 +130,18 @@ def main():
     parser.add_argument("--test", action="store_true", help="Optionally run HIL test suite after flashing")
     args, extra_pytest_args = parser.parse_known_args()
 
-    flash_firmware(
-        auto_reset=not args.no_reset,
-        mount=args.mount,
-        uf2_path=args.uf2,
-        timeout=args.timeout,
-        run_tests=args.test,
-        extra_pytest_args=extra_pytest_args
-    )
+    try:
+        flash_firmware(
+            auto_reset=not args.no_reset,
+            mount=args.mount,
+            uf2_path=args.uf2,
+            timeout=args.timeout,
+            run_tests=args.test,
+            extra_pytest_args=extra_pytest_args
+        )
+    except RuntimeError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

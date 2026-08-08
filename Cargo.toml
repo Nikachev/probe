@@ -1,5 +1,5 @@
 [package]
-authors = ["Port to nice!nano v2"]
+authors = ["Probe-rs development team"]
 edition = "2021"
 name = "rusty-probe-nicenano"
 version = "0.1.0"
@@ -44,7 +44,6 @@ cortex-m-rt = "0.7.3"
 # RTIC v2 with Cortex-M4 (basepri) backend
 rtic = { version = "2", features = ["thumbv7-backend"] }
 rtic-monotonics = { version = "2", features = ["nrf52840"] }
-rtic-common = { version = "1" }
 
 # nRF52840 HAL + PAC
 nrf52840-hal = "0.19"

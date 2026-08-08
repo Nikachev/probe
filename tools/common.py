@@ -8,6 +8,8 @@ import sys
 import time
 import shutil
 import subprocess
+import hashlib
+import re
 
 PROBE_VID_PID = "1209:4853"
 TARGET_CHIP = "nRF52840_xxAA"
@@ -24,7 +26,7 @@ class CoreSightAddr:
     FPB_CTRL = "0xE0002000"
     DWT_CTRL = "0xE0001000"
     RAM_BASE = "0x20004000"
-    FLASH_BASE = "0x00026000"
+    FLASH_BASE = "0x00001000"
     FLASH_VECTOR_TABLE = "0x00000000"
 
 
@@ -45,6 +47,7 @@ class HILConfig:
         self.word_pattern_2 = 0xDEADBEEF
         self.word_pattern_3 = 0xCAFEBABE
         self.rtt_magic = 0x52545431
+        self.default_speed = None
 
     @property
     def ram_test_addr(self) -> str:
@@ -111,16 +114,26 @@ def ensure_targets_built(targets_dir=TARGETS_DIR):
         # Perform staleness check against Rust source files in src/
         src_dir = os.path.join(PROJECT_ROOT, "src")
         oldest_target_mtime = min(os.path.getmtime(p) for p in target_paths)
-        for root, _, files in os.walk(src_dir):
-            for f in files:
-                if f.endswith(".rs"):
-                    src_path = os.path.join(root, f)
-                    if os.path.getmtime(src_path) > oldest_target_mtime:
-                        print(f"Note: Source file '{f}' updated. Rebuilding test target binaries...")
-                        rebuild_needed = True
-                        break
-            if rebuild_needed:
+        
+        # Also check Cargo.toml and Cargo.lock for dependency changes
+        for cargo_file in ["Cargo.toml", "Cargo.lock"]:
+            cargo_path = os.path.join(PROJECT_ROOT, cargo_file)
+            if os.path.exists(cargo_path) and os.path.getmtime(cargo_path) > oldest_target_mtime:
+                print(f"Note: '{cargo_file}' updated. Rebuilding test target binaries...")
+                rebuild_needed = True
                 break
+
+        if not rebuild_needed:
+            for root, _, files in os.walk(src_dir):
+                for f in files:
+                    if f.endswith(".rs"):
+                        src_path = os.path.join(root, f)
+                        if os.path.getmtime(src_path) > oldest_target_mtime:
+                            print(f"Note: Source file '{f}' updated. Rebuilding test target binaries...")
+                            rebuild_needed = True
+                            break
+                if rebuild_needed:
+                    break
 
     if rebuild_needed:
         build_script = os.path.join(SCRIPT_DIR, "build-test-targets.sh")
@@ -128,9 +141,6 @@ def ensure_targets_built(targets_dir=TARGETS_DIR):
             subprocess.run([build_script], check=True)
         else:
             raise FileNotFoundError(f"Build script {build_script} not found!")
-
-
-import hashlib
 
 
 class FlashTracker:
@@ -418,7 +428,6 @@ class ProbeRsClient:
 
 def parse_hex_words(text, ignore_addr=None):
     """Extract hexadecimal integer values from probe-rs output text, excluding ignore_addr if provided."""
-    import re
     ignore_val = None
     if ignore_addr is not None:
         try:
